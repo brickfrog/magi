@@ -215,7 +215,7 @@ fn split<'b>(
     name: &str,
 ) -> Result<Vec<&'b [u8]>, SourceError> {
     if let Some(len) = record_length {
-        if bytes.len() % len != 0 {
+        if !bytes.len().is_multiple_of(len) {
             return Err(SourceError {
                 code: "M200",
                 message: format!(
