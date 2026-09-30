@@ -16,6 +16,7 @@ use crate::semantic::hir::{Hir, Node, RelKind};
 use crate::semantic::load::{self, Loaded};
 use crate::semantic::resolve::{self, Options};
 use crate::semantic::schema::SchemaProvider;
+use crate::snapshot::{self, diff};
 use crate::source::Reader;
 use crate::testing;
 
@@ -78,6 +79,31 @@ enum Command {
         /// Only run the tests whose name contains this text
         #[arg(long)]
         filter: Option<String>,
+        #[command(flatten)]
+        today: Today,
+    },
+    /// Run a program without writing its exports and save every relation it builds in one
+    /// DuckDB file
+    Snapshot {
+        file: PathBuf,
+        /// File to write (default: `<file stem>.snapshot.duckdb` next to the program)
+        #[arg(long, value_name = "PATH")]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        today: Today,
+    },
+    /// Compare the relations of two snapshots or programs (a `.magi` program is run now,
+    /// without writing its exports)
+    Diff {
+        old: PathBuf,
+        new: PathBuf,
+        /// List up to N added and N removed rows of each relation that differs (default 0:
+        /// no data values are printed)
+        #[arg(long, value_name = "N", default_value_t = 0)]
+        rows: usize,
+        /// Only compare this relation (repeatable)
+        #[arg(long = "relation", value_name = "NAME")]
+        relations: Vec<String>,
         #[command(flatten)]
         today: Today,
     },
@@ -191,6 +217,14 @@ fn analyse(
         eprintln!("error: {e}");
         ExitCode::from(2)
     })?;
+    analyse_loaded(loaded, contact_external, today)
+}
+
+fn analyse_loaded(
+    loaded: Loaded,
+    contact_external: bool,
+    today: Option<String>,
+) -> Result<Analysed, ExitCode> {
     let mut reader = Reader::new(contact_external).map_err(|e| {
         eprintln!("error: {e}");
         ExitCode::from(2)
@@ -274,6 +308,14 @@ pub fn main() -> ExitCode {
             filter,
             today,
         } => test_cmd(&paths, filter.as_deref(), today.date),
+        Command::Snapshot { file, out, today } => snapshot_cmd(&file, out, today.date),
+        Command::Diff {
+            old,
+            new,
+            rows,
+            relations,
+            today,
+        } => diff_cmd(&old, &new, rows, relations, today.date),
         Command::Fmt {
             paths,
             check,
@@ -454,6 +496,105 @@ fn run_cmd(
         eprintln!("done");
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Run `file` without writing its exports (every relation is built), like `magi run
+/// --keep-going`, printing its diagnostics. Returns the run and whether a check or step failed;
+/// exit code 1 when the program does not analyse or the run stops.
+fn program_run(file: &Path, today: Option<String>) -> Result<(snapshot::Run, bool), ExitCode> {
+    let loaded = load::load(file).map_err(|e| {
+        eprintln!("error: {e}");
+        ExitCode::from(2)
+    })?;
+    let mut a = analyse_loaded(loaded.without_outputs(Clone::clone), true, today)?;
+    print_diagnostics(&a.loaded, &a.diags.list, Severity::Warning);
+    if a.diags.has_errors() {
+        eprintln!(
+            "{}: {} error(s); nothing was executed",
+            file.display(),
+            a.diags.count(Severity::Error)
+        );
+        return Err(ExitCode::from(1));
+    }
+    let p = physical::build(&a.hir);
+    let (outcome, conn) = run::execute_keep(
+        &a.hir,
+        &p,
+        &mut a.reader,
+        &run::RunOptions { keep_going: true },
+        &mut |_| {},
+    );
+    print_diagnostics(&a.loaded, &outcome.diagnostics, Severity::Note);
+    let Some(conn) = conn.filter(|_| outcome.completed) else {
+        eprintln!("{}: the run stopped", file.display());
+        return Err(ExitCode::from(1));
+    };
+    let failed = outcome.failed || outcome.diagnostics.iter().any(Diagnostic::is_error);
+    let run = snapshot::Run {
+        file: file.to_path_buf(),
+        loaded: a.loaded,
+        hir: a.hir,
+        conn,
+    };
+    Ok((run, failed))
+}
+
+/// `magi snapshot`: 0 when written, 1 when the run failed a check or step (written anyway once
+/// the run completed) or could not run, 2 when the file cannot be read or written.
+fn snapshot_cmd(
+    file: &Path,
+    out: Option<PathBuf>,
+    today: Option<String>,
+) -> Result<ExitCode, ExitCode> {
+    let path = out.unwrap_or_else(|| {
+        let stem = file
+            .file_stem()
+            .map_or_else(|| "program".into(), |s| s.to_string_lossy().into_owned());
+        file.with_file_name(format!("{stem}.snapshot.duckdb"))
+    });
+    let (run, failed) = program_run(file, today)?;
+    let io = |e: String| {
+        eprintln!("error: {e}");
+        ExitCode::from(2)
+    };
+    let meta = snapshot::metadata(&run).map_err(io)?;
+    snapshot::write(&run, &meta, &path).map_err(io)?;
+    println!(
+        "snapshot of {} relations written to {}",
+        run.hir.relations.len(),
+        path.display()
+    );
+    Ok(ExitCode::from(u8::from(failed)))
+}
+
+/// `magi diff`, exit codes as diff(1): 0 when the compared relations are equal, 1 when they
+/// differ, 2 when a side cannot be read or a program side does not analyse or run.
+fn diff_cmd(
+    old: &Path,
+    new: &Path,
+    rows: usize,
+    relations: Vec<String>,
+    today: Option<String>,
+) -> Result<ExitCode, ExitCode> {
+    let input = |p: &Path| -> Result<diff::Input, ExitCode> {
+        if p.extension().is_some_and(|x| x == "magi") {
+            let (run, _) = program_run(p, today.clone()).map_err(|_| ExitCode::from(2))?;
+            Ok(diff::Input::Program(Box::new(run)))
+        } else {
+            Ok(diff::Input::Snapshot(p.to_path_buf()))
+        }
+    };
+    let (old, new) = (input(old)?, input(new)?);
+    match diff::diff(old, new, &diff::Options { rows, relations }) {
+        Ok(report) => {
+            print!("{}", report.text);
+            Ok(ExitCode::from(u8::from(report.differs)))
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            Err(ExitCode::from(2))
+        }
+    }
 }
 
 fn find_relation<'h>(

@@ -618,3 +618,38 @@ print data values. The program's own warnings and notes are printed once; for ea
 errors of its program and the warnings its changes bring. With several files, each file's path
 precedes its tests. The exit code is 0 when every test passes, 1 when one fails, and 2 when a
 file cannot be read, a file named explicitly has no tests, or no test is selected.
+
+## Snapshots and diffs
+
+```bash
+magi snapshot reconcile.magi                      # writes reconcile.snapshot.duckdb
+# ... edit the policy ...
+magi diff reconcile.snapshot.duckdb reconcile.magi  # which relations the edit changed
+magi diff old.snapshot.duckdb new.snapshot.duckdb --rows 10 --relation rec.matches
+```
+
+`magi snapshot FILE [--out PATH] [--today YYYY-MM-DD]` runs the program like `magi run
+--keep-going`, contacting its sources, but writes none of its exports: it saves every relation
+the run builds (sources, `.rejects`, datasets, every reconcile output, `.checks` and
+`.failures`) in one DuckDB database, by default `<file stem>.snapshot.duckdb` next to the
+program. Each relation is a table named exactly like the relation, with its column types. The
+table `__magi_snapshot` holds `(key, value)` rows saying what produced it: `magi_version`,
+`created` (UTC), `today`, `program:<path>` (the MD5 of each program file, imports included),
+`file:<path>` (`<md5> <bytes>` of each file a source read) and `sql:<source>` (the connection
+and the MD5 of the query; never credentials), paths relative to the program's directory. The
+file is replaced only once the new snapshot is complete. The exit code is 0, or 1 when a check
+failed (the snapshot is still written) or the program could not run (nothing is written), or 2
+when a file cannot be read or written.
+
+`magi diff OLD NEW [--rows N] [--relation NAME]... [--today YYYY-MM-DD]` compares two runs;
+each side is a snapshot file or a program (a `.magi` file, run now as `magi snapshot` would).
+It first says which program files and inputs changed, were added or removed (by MD5), and a
+changed `today` or MAGI version. Then, for each relation that differs (NEW's program order, else
+by name): how many rows were added and removed, compared as multisets on the columns both
+sides have and as the text a CSV export writes (so a column whose type changed still compares by
+value); which columns were added, removed or changed type; and relations that only one side
+has. Unchanged relations are not listed. `--relation` (repeatable, names in any case) limits
+the comparison. `--rows N` lists up to N added and N removed rows per relation; without it no
+data value is printed. The exit code is 0 when the compared relations are equal, 1 when they
+differ, and 2 when a side cannot be read, is not a snapshot, or is a program that does not
+analyse or run, or a `--relation` names nothing.

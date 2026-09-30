@@ -1,0 +1,29 @@
+# rec.magi with a second tier: late payments match too
+source ledger = csv("ledger.csv") {
+    identity id
+    schema {
+        id: string
+        amount: decimal(10, 2)
+        day: date
+    }
+}
+
+source bank = csv("bank.csv") { identity ref }
+
+reconcile rec = ledger as a with bank as b {
+    cardinality one_to_one
+    tier exact {
+        block by amount
+        require a.day == b.day
+    }
+    tier late {
+        block by amount
+        require days_between(a.day, b.day) <= 3
+    }
+}
+
+validate ledger {
+    require amount > 0 as "positive amounts"
+}
+
+export rec.matches to "out/matches.csv"

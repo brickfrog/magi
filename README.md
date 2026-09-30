@@ -13,6 +13,8 @@ magi check   analysis.magi              # parse, resolve, type check (no executi
 magi plan    analysis.magi              # the steps a run would take
 magi run     analysis.magi              # execute and write exports
 magi test    tests/                     # run `test` declarations: fixture inputs, expected files
+magi snapshot analysis.magi             # every relation of a run, saved in one DuckDB file
+magi diff    old.snapshot.duckdb analysis.magi  # which relations an edit changed
 magi explain analysis.magi matches      # how a relation is computed
 magi sql     analysis.magi matches      # the DuckDB SQL `run` executes (whole program: settings first)
 magi schema  analysis.magi a            # columns of a source or relation

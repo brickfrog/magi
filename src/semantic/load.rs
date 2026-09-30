@@ -23,6 +23,36 @@ impl Loaded {
     pub fn statements(&self) -> impl Iterator<Item = &Statement> {
         self.files.iter().flat_map(|f| f.statements.iter())
     }
+
+    /// The program without its `export`, `model` and `test` statements, each source declaration
+    /// replaced by `source(declaration)` (same source map, so spans stay valid): it writes no
+    /// file, and without exports every relation is computed (`plan::optimize::needed`).
+    pub fn without_outputs(
+        &self,
+        mut source: impl FnMut(&ast::SourceDecl) -> ast::SourceDecl,
+    ) -> Loaded {
+        let files = self
+            .files
+            .iter()
+            .map(|f| ast::Program {
+                statements: f
+                    .statements
+                    .iter()
+                    .filter_map(|s| match s {
+                        Statement::Export(_) | Statement::Model(_) | Statement::Test(_) => None,
+                        Statement::Source(d) => Some(Statement::Source(source(d))),
+                        s => Some(s.clone()),
+                    })
+                    .collect(),
+            })
+            .collect();
+        Loaded {
+            sources: self.sources.clone(),
+            files,
+            diagnostics: self.diagnostics.clone(),
+            failed_names: self.failed_names.clone(),
+        }
+    }
 }
 
 pub fn load(path: &Path) -> Result<Loaded, String> {

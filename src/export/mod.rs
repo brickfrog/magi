@@ -132,6 +132,17 @@ pub struct Staged {
 }
 
 impl Staged {
+    /// A file to be written to [`Staged::tmp`], a fresh name next to `path` that [`commit`]
+    /// later moves onto `path`.
+    pub fn new(path: &Path) -> Staged {
+        Staged {
+            tmp: unique_sibling(path, "tmp"),
+            path: path.to_path_buf(),
+        }
+    }
+    pub fn tmp(&self) -> &Path {
+        &self.tmp
+    }
     pub fn discard(self) {
         remove_temp(&self.tmp);
     }
@@ -229,7 +240,8 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let tmp = unique_sibling(path, "tmp");
+    let staged = Staged::new(path);
+    let tmp = staged.tmp();
     let mut written = Vec::new();
     let mut as_text = Vec::new();
     let result = (|| -> Result<(), String> {
@@ -266,34 +278,15 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
                 written.push((part.relation.clone(), count(conn, &part.relation)?));
             }
             ExportFormat::DuckDb => {
-                let alias = "__magi_out";
-                conn.execute_batch(&sql::render(&Stmt::Attach {
-                    path: tmp.display().to_string(),
-                    alias: alias.into(),
-                    read_only: false,
-                }))
-                .map_err(|e| e.to_string())?;
-                let r = (|| {
-                    for part in &export.parts {
-                        let columns: Vec<String> = describe(conn, &part.relation)?
-                            .into_iter()
-                            .map(|(n, _)| n)
-                            .collect();
-                        let q = sql::render_query(&ordered_query(hir, &part.relation, &columns));
-                        conn.execute_batch(&format!(
-                            "CREATE TABLE {}.{} AS {q}",
-                            sql::ident(alias),
-                            sql::ident(&part.name)
-                        ))
-                        .map_err(|e| e.to_string())?;
-                        written.push((part.relation.clone(), count(conn, &part.relation)?));
-                    }
-                    Ok::<(), String>(())
-                })();
-                let _ = conn.execute_batch(&sql::render(&Stmt::Detach {
-                    alias: alias.into(),
-                }));
-                r?;
+                let tables: Vec<(&str, &str)> = export
+                    .parts
+                    .iter()
+                    .map(|p| (p.name.as_str(), p.relation.as_str()))
+                    .collect();
+                write_duckdb(conn, hir, tmp, &tables)?;
+                for part in &export.parts {
+                    written.push((part.relation.clone(), count(conn, &part.relation)?));
+                }
             }
             ExportFormat::Xlsx => {
                 let mut sheets = Vec::new();
@@ -303,15 +296,11 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
                     as_text.extend(text.into_iter().map(|(col, n)| (part.name.clone(), col, n)));
                     sheets.push(sheet);
                 }
-                excel::write_xlsx(&tmp, &sheets)?;
+                excel::write_xlsx(tmp, &sheets)?;
             }
         }
         Ok(())
     })();
-    let staged = Staged {
-        tmp,
-        path: path.clone(),
-    };
     match result {
         Ok(()) => Ok(Written {
             staged,
@@ -323,6 +312,46 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
             Err(e)
         }
     }
+}
+
+/// Write each `(table, relation)` as table `table` of a new DuckDB database file at `path`,
+/// with the relation's column types and its rows in export order ([`ordered_query`]).
+pub fn write_duckdb(
+    conn: &duckdb::Connection,
+    hir: &Hir,
+    path: &Path,
+    tables: &[(&str, &str)],
+) -> Result<(), String> {
+    let alias = "__magi_out";
+    conn.execute_batch(&sql::render(&Stmt::Attach {
+        path: path.display().to_string(),
+        alias: alias.into(),
+        read_only: false,
+    }))
+    .map_err(|e| e.to_string())?;
+    let r = (|| {
+        for (table, relation) in tables {
+            let columns: Vec<String> = describe(conn, relation)?
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect();
+            let q = sql::render_query(&ordered_query(hir, relation, &columns));
+            conn.execute_batch(&format!(
+                "CREATE TABLE {}.{} AS {q}",
+                sql::ident(alias),
+                sql::ident(table)
+            ))
+            .map_err(|e| e.to_string())?;
+        }
+        Ok::<(), String>(())
+    })();
+    // detaching writes the tables to the file: a failure there leaves it incomplete
+    let detached = conn
+        .execute_batch(&sql::render(&Stmt::Detach {
+            alias: alias.into(),
+        }))
+        .map_err(|e| e.to_string());
+    r.and(detached)
 }
 
 /// Read a relation into typed spreadsheet cells, with `(column, count)` of the numbers written

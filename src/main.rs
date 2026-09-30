@@ -10,6 +10,7 @@ mod lineage;
 mod plan;
 mod reconcile;
 mod semantic;
+mod snapshot;
 mod source;
 mod syntax;
 mod testing;

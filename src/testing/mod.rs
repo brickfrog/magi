@@ -206,33 +206,10 @@ pub fn prepare(loaded: &Loaded, test: &TestDecl, today: &str) -> Result<Prepared
         givens.insert(key, (name, given));
     }
 
-    let files = loaded
-        .files
-        .iter()
-        .map(|f| ast::Program {
-            statements: f
-                .statements
-                .iter()
-                .filter_map(|s| match s {
-                    Statement::Export(_) | Statement::Model(_) | Statement::Test(_) => None,
-                    Statement::Source(d) => {
-                        let given = givens.get(&d.name.name.to_ascii_lowercase());
-                        Some(Statement::Source(match given {
-                            Some((_, g)) => substitute(d, g),
-                            None => d.clone(),
-                        }))
-                    }
-                    s => Some(s.clone()),
-                })
-                .collect(),
-        })
-        .collect();
-    let program = Loaded {
-        sources: loaded.sources.clone(),
-        files,
-        diagnostics: loaded.diagnostics.clone(),
-        failed_names: loaded.failed_names.clone(),
-    };
+    let program = loaded.without_outputs(|d| match givens.get(&d.name.name.to_ascii_lowercase()) {
+        Some((_, g)) => substitute(d, g),
+        None => d.clone(),
+    });
     let mut reader = Reader::new(false)?;
     let (hir, analysed) = resolve::analyze(
         &program,

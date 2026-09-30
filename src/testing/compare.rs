@@ -1,10 +1,10 @@
 //! Running a prepared test and comparing its relations with what the test expects.
 //!
-//! Rows are compared as multisets on the expected file's columns, as text: each relation value
-//! is cast to `VARCHAR`, which is how DuckDB's CSV writer (every `.csv` export) renders it, and
-//! null is an empty field. So a test's expected file can be an export with columns and rows
-//! deleted.
+//! Rows are compared as multisets on the expected file's columns, as text
+//! ([`crate::backend::compare`]): an empty field of the file is null. So a test's expected file
+//! can be an export with columns and rows deleted.
 
+use crate::backend::compare::{Res, count, db, except, list, plural, rendered};
 use crate::backend::run::{self, RunOptions};
 use crate::backend::sql;
 use crate::diagnostic::{Diagnostic, Severity};
@@ -109,13 +109,6 @@ pub fn run(p: &mut Prepared) -> Verdict {
     }
 }
 
-type Res<T> = Result<T, String>;
-
-/// DuckDB errors without the data values they may quote.
-fn db<T>(r: Result<T, duckdb::Error>) -> Res<T> {
-    r.map_err(|e| run::redact(&e))
-}
-
 /// `(check, severity, failing rows)` of the failed `require` and `expect` checks.
 fn failed_checks(
     conn: &duckdb::Connection,
@@ -150,6 +143,7 @@ fn compare(conn: &duckdb::Connection, hir: &Hir, e: &Expect) -> Res<Option<Strin
             &rendered(&rel, &columns),
             &columns,
             n,
+            SHOWN,
         )?;
         return Ok(Some(report));
     };
@@ -157,19 +151,6 @@ fn compare(conn: &duckdb::Connection, hir: &Hir, e: &Expect) -> Res<Option<Strin
     let result = differences(conn, &rel, file, &e.relation);
     db(conn.execute_batch(&format!("DROP TABLE {}", sql::ident(EXPECTED))))?;
     result
-}
-
-/// `SELECT` of `columns` of `rel`, rendered as text.
-fn rendered(rel: &str, columns: &[String]) -> String {
-    let items = columns
-        .iter()
-        .map(|c| {
-            let c = sql::ident(c);
-            format!("CAST({c} AS VARCHAR) AS {c}")
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("SELECT {items} FROM {rel}")
 }
 
 fn load_expected(conn: &duckdb::Connection, file: &ExpectedFile) -> Res<()> {
@@ -198,12 +179,9 @@ fn differences(
 ) -> Res<Option<String>> {
     let actual = rendered(rel, &file.columns);
     let expected = format!("SELECT * FROM {}", sql::ident(EXPECTED));
-    let missing = format!("{expected} EXCEPT ALL {actual}");
-    let unexpected = format!("{actual} EXCEPT ALL {expected}");
-    let count = |q: &str| -> Res<i64> {
-        db(conn.query_row(&format!("SELECT count(*) FROM ({q})"), [], |r| r.get(0)))
-    };
-    let (m, u) = (count(&missing)?, count(&unexpected)?);
+    let missing = except(&expected, &actual);
+    let unexpected = except(&actual, &expected);
+    let (m, u) = (count(conn, &missing)?, count(conn, &unexpected)?);
     if m == 0 && u == 0 {
         return Ok(None);
     }
@@ -228,6 +206,7 @@ fn differences(
             &missing,
             &file.columns,
             m,
+            SHOWN,
         )?;
     }
     if u > 0 {
@@ -238,63 +217,8 @@ fn differences(
             &unexpected,
             &file.columns,
             u,
+            SHOWN,
         )?;
     }
     Ok(Some(report))
-}
-
-/// Append up to [`SHOWN`] of the `total` rows of `query` to `report`, sorted by their values:
-/// one indented line each, `prefix` then `col=value, ...` with each value written as in a CSV
-/// file (null is empty; `""` is the empty string; a value with a comma, quote, line break or
-/// surrounding spaces is quoted).
-fn list(
-    conn: &duckdb::Connection,
-    report: &mut String,
-    prefix: &str,
-    query: &str,
-    columns: &[String],
-    total: i64,
-) -> Res<()> {
-    let order = (1..=columns.len())
-        .map(|i| format!("{i} NULLS FIRST"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let q = format!("SELECT * FROM ({query}) ORDER BY {order} LIMIT {SHOWN}");
-    let mut stmt = db(conn.prepare(&q))?;
-    let rows = db(stmt.query_map([], |r| {
-        (0..columns.len())
-            .map(|i| r.get::<_, Option<String>>(i))
-            .collect::<Result<Vec<_>, _>>()
-    }))?;
-    for row in rows {
-        let fields = columns
-            .iter()
-            .zip(db(row)?)
-            .map(|(c, v)| format!("{c}={}", v.as_deref().map_or(String::new(), csv_field)))
-            .collect::<Vec<_>>()
-            .join(", ");
-        report.push_str(&format!("\n  {prefix}{fields}"));
-    }
-    let more = total - SHOWN as i64;
-    if more > 0 {
-        report.push_str(&format!("\n  ... and {more} more"));
-    }
-    Ok(())
-}
-
-fn csv_field(v: &str) -> String {
-    let quote = v.is_empty() || v.trim() != v || v.contains([',', '"', '\n', '\r']);
-    if quote {
-        format!("\"{}\"", v.replace('"', "\"\""))
-    } else {
-        v.to_string()
-    }
-}
-
-fn plural(n: i64, word: &str) -> String {
-    if n == 1 {
-        word.to_string()
-    } else {
-        format!("{word}s")
-    }
 }

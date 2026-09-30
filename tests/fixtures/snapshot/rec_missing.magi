@@ -1,0 +1,18 @@
+# rec.magi whose ledger file is missing: the run cannot happen
+source ledger = csv("missing.csv") {
+    identity id
+    schema {
+        id: string
+        amount: decimal(10, 2)
+        day: date
+    }
+}
+
+source bank = csv("bank.csv") { identity ref }
+
+reconcile rec = ledger as a with bank as b {
+    cardinality one_to_one
+    tier exact {
+        block by amount
+    }
+}
