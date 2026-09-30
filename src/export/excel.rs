@@ -8,10 +8,11 @@
 //! Representation limits (Excel stores every number as an IEEE double):
 //! - [`Cell::Int`] values beyond ±2^53 would lose precision, so they are written as text. The
 //!   export hands such ints (including those beyond i64) and decimals with more than 15
-//!   significant digits over as text cells, and warns (M506) naming the column.
+//!   significant digits over as text cells, and warns (M506) naming the column; so it does with
+//!   times and timestamps finer than a millisecond (Excel's limit).
 //! - Non-finite [`Cell::Float`] values (NaN, ±infinity) are written as text.
 //! - Dates and timestamps outside Excel's range (1900-01-01..9999-12-31) are written as ISO text.
-//! - Timestamps keep millisecond precision (Excel's limit); the display format shows seconds.
+//! - Times and timestamps keep their milliseconds; the display format shows seconds.
 //!
 //! Output is byte-for-byte reproducible for identical input: the document creation time is
 //! pinned and the archive uses fixed entry timestamps.
@@ -51,6 +52,7 @@ pub enum Cell {
         hour: u32,
         minute: u32,
         second: u32,
+        micros: u32,
     },
 }
 
@@ -307,18 +309,23 @@ fn write_cell(
             hour,
             minute,
             second,
+            micros,
         } => {
+            let seconds = f64::from(second) + f64::from(micros) / 1e6;
             let time = u16::try_from(hour)
                 .ok()
                 .zip(u8::try_from(minute).ok())
-                .and_then(|(h, m)| ExcelDateTime::from_hms(h, m, second).ok());
+                .and_then(|(h, m)| ExcelDateTime::from_hms(h, m, seconds).ok());
             match time {
                 Some(t) => {
                     ws.write_datetime_with_format(r, c, t, &formats.time)?;
                     8
                 }
                 None => {
-                    let text = format!("{hour:02}:{minute:02}:{second:02}");
+                    let mut text = format!("{hour:02}:{minute:02}:{second:02}");
+                    if micros != 0 {
+                        text.push_str(&format!(".{micros:06}"));
+                    }
                     ws.write_string(r, c, &text)?;
                     text.len()
                 }
@@ -407,6 +414,7 @@ mod tests {
                             hour: 8,
                             minute: 5,
                             second: 9,
+                            micros: 250_000,
                         },
                     ],
                     vec![
@@ -481,9 +489,11 @@ mod tests {
         };
         assert_eq!(dt(&r1[7]), (2026, 7, 1, 0, 0, 0, 0));
         assert_eq!(dt(&r1[8]), (2026, 7, 1, 13, 45, 30, 0));
+        // the time keeps its milliseconds
         match &r1[9] {
             Data::DateTime(t) => {
-                assert!((t.as_f64() - (8.0 * 3600.0 + 5.0 * 60.0 + 9.0) / 86_400.0).abs() < 1e-9)
+                let seconds = 8.0 * 3600.0 + 5.0 * 60.0 + 9.25;
+                assert!((t.as_f64() - seconds / 86_400.0).abs() < 1e-9)
             }
             other => panic!("expected a time cell, got {other:?}"),
         }

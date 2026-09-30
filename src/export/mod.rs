@@ -438,14 +438,24 @@ fn read_sheet(
                     .get::<_, Option<String>>(i)
                     .map_err(|e| e.to_string())?
                     .and_then(|v| parse_date(&v)),
-                Type::Timestamp | Type::TimestampTz => row
-                    .get::<_, Option<String>>(i)
-                    .map_err(|e| e.to_string())?
-                    .and_then(|v| parse_timestamp(&v)),
-                Type::Time => row
-                    .get::<_, Option<String>>(i)
-                    .map_err(|e| e.to_string())?
-                    .and_then(|v| parse_time(&v)),
+                // Excel keeps a time to the millisecond: finer values are written as text (M506)
+                Type::Timestamp | Type::TimestampTz | Type::Time => {
+                    let text = row.get::<_, Option<String>>(i).map_err(|e| e.to_string())?;
+                    text.map(|v| {
+                        let parsed = if *t == Type::Time {
+                            parse_time(&v)
+                        } else {
+                            parse_timestamp(&v)
+                        };
+                        match parsed {
+                            Some(cell) if whole_millis(&cell) => cell,
+                            _ => {
+                                as_text[i] += 1;
+                                Cell::String(v)
+                            }
+                        }
+                    })
+                }
                 _ => row
                     .get::<_, Option<String>>(i)
                     .map_err(|e| e.to_string())?
@@ -510,14 +520,11 @@ fn parse_timestamp(s: &str) -> Option<Cell> {
         hour,
         minute,
         second,
+        micros,
     } = parse_time(t)?
     else {
         return None;
     };
-    let micros = t
-        .split_once('.')
-        .and_then(|(_, f)| format!("{f:0<6}")[..6].parse().ok())
-        .unwrap_or(0);
     Some(Cell::Timestamp {
         year,
         month,
@@ -529,14 +536,28 @@ fn parse_timestamp(s: &str) -> Option<Cell> {
     })
 }
 
+/// `hh:mm:ss[.ffffff]`.
 fn parse_time(s: &str) -> Option<Cell> {
-    let main = s.split('.').next()?;
+    let (main, fraction) = s.split_once('.').unwrap_or((s, ""));
     let mut it = main.splitn(3, ':');
     Some(Cell::Time {
         hour: it.next()?.parse().ok()?,
         minute: it.next()?.parse().ok()?,
         second: it.next()?.parse().ok()?,
+        micros: if fraction.is_empty() {
+            0
+        } else {
+            format!("{fraction:0<6}").get(..6)?.parse().ok()?
+        },
     })
+}
+
+/// A time or timestamp Excel holds exactly: no digits finer than a millisecond.
+fn whole_millis(cell: &Cell) -> bool {
+    match cell {
+        Cell::Time { micros, .. } | Cell::Timestamp { micros, .. } => micros % 1000 == 0,
+        _ => true,
+    }
 }
 
 #[cfg(test)]

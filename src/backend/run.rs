@@ -996,10 +996,10 @@ impl Runner<'_> {
                     self.diags.push(
                         Diagnostic::warning(
                             "M506",
-                            format!("`{}`: {n} value(s) in column `{col}` of sheet `{sheet}` cannot be stored exactly as an Excel number and were written as text", e.display_path),
+                            format!("`{}`: {n} value(s) in column `{col}` of sheet `{sheet}` cannot be stored exactly in an Excel cell and were written as text", e.display_path),
                         )
                         .label(e.span, "this export")
-                        .help("Excel numbers hold 15 significant digits; export to .csv, .parquet or .duckdb to keep them as numbers"),
+                        .help("Excel numbers hold 15 significant digits and times milliseconds; export to .csv, .parquet or .duckdb to keep the values as they are"),
                     );
                 }
                 Ok(())

@@ -110,12 +110,15 @@ pub fn read_excel(path: &Path, opts: &ExcelOptions) -> Result<StagedTable, Sourc
         None => resolve_region(&range, opts, &file, &sheet)?,
     };
     let merged = merged_cells(&mut workbook, &sheet);
+    // formulas, to tell a formula whose result was never saved from an empty cell
+    let formulas = workbook.worksheet_formula(&sheet).ok();
     Ok(TableReader {
         range: &range,
         sheet: &sheet,
         region,
         opts,
         merged: &merged,
+        formulas: formulas.as_ref(),
     }
     .read())
 }
@@ -914,9 +917,21 @@ struct TableReader<'a> {
     opts: &'a ExcelOptions,
     /// Merged ranges of the sheet, 0-based absolute coordinates.
     merged: &'a [Dimensions],
+    /// The sheet's formulas, when the format has them.
+    formulas: Option<&'a Range<String>>,
 }
 
 impl TableReader<'_> {
+    /// A cell that holds a formula but no value: the workbook was written by a program that
+    /// does not compute formulas, and never opened and saved in Excel.
+    fn uncomputed(&self, row: u32, col: u32) -> bool {
+        self.is_empty(row, col)
+            && self
+                .formulas
+                .and_then(|f| f.get_value((row, col)))
+                .is_some_and(|f| !f.is_empty())
+    }
+
     fn cell(&self, row: u32, col: u32) -> Cell {
         classify(self.range.get_value((row, col)))
     }
@@ -967,6 +982,8 @@ impl TableReader<'_> {
         let mut last: Vec<Cell> = vec![Cell::Empty; width];
         let mut cells: Vec<Vec<Cell>> = Vec::new();
         let mut stats: Vec<ColStats> = (0..width).map(|_| ColStats::new()).collect();
+        // per column: formula cells without a value, and the first few of them
+        let mut uncomputed: Vec<(usize, Vec<(u32, u32)>)> = vec![(0, Vec::new()); width];
         let mut blank_skipped = 0usize;
         let mut ended_at: Option<u32> = None;
         for row in data_start..=r1 {
@@ -979,6 +996,12 @@ impl TableReader<'_> {
                 continue;
             }
             let mut row_cells: Vec<Cell> = (c0..=c1).map(|c| self.cell(row, c)).collect();
+            for (i, col) in (c0..=c1).enumerate() {
+                if self.uncomputed(row, col) {
+                    uncomputed[i].0 += 1;
+                    push_ref(&mut uncomputed[i].1, (row, col));
+                }
+            }
             for &i in &fill {
                 if row_cells[i].is_blank() {
                     row_cells[i] = last[i].clone();
@@ -1018,7 +1041,7 @@ impl TableReader<'_> {
 
         // Infer column types.
         let mut types = Vec::with_capacity(width);
-        for (name, st) in names.iter().zip(&stats) {
+        for ((name, st), (n, refs)) in names.iter().zip(&stats).zip(&uncomputed) {
             if st.errors > 0 {
                 table.warn(format!(
                     "column {name}: {} read as null",
@@ -1026,6 +1049,20 @@ impl TableReader<'_> {
                         &plural(st.errors, "error cell", "error cells"),
                         &st.error_refs,
                         st.errors
+                    )
+                ));
+            }
+            if *n > 0 {
+                table.warn(format!(
+                    "column {name}: {} read as null — open and save the workbook in Excel to store their results",
+                    with_refs(
+                        &plural(
+                            *n,
+                            "formula cell without a saved result",
+                            "formula cells without a saved result"
+                        ),
+                        refs,
+                        *n
                     )
                 ));
             }

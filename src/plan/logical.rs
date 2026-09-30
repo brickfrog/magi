@@ -75,9 +75,12 @@ pub enum LogicalPlan {
         input: Box<LogicalPlan>,
         keys: Vec<OrderKey>,
     },
+    /// The first `n` rows in `order` (the pipeline's sort keys, repeated so that the rows kept
+    /// do not depend on steps between the sort and the limit keeping the order).
     Limit {
         input: Box<LogicalPlan>,
         n: u64,
+        order: Vec<OrderKey>,
     },
     /// `native_sql` escape hatch (DuckDB dialect).
     NativeSql {
@@ -245,7 +248,7 @@ impl LogicalPlan {
                 let _ = writeln!(out, "{pad}Sort [{keys}]");
                 input.explain_into(out, depth + 1);
             }
-            LogicalPlan::Limit { input, n } => {
+            LogicalPlan::Limit { input, n, .. } => {
                 let _ = writeln!(out, "{pad}Limit {n}");
                 input.explain_into(out, depth + 1);
             }

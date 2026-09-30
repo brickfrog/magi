@@ -58,7 +58,7 @@ decimal values that the declared scale changes are reported (M209); a declared i
 unique and present (M211), so its columns are never null in the source relation.
 
 CSV column types come from every value, not a sample: plain decimals become `decimal`, only
-exponent notation becomes `float`; codes with leading zeros and integers beyond 64 bits stay
+exponent notation (and `nan`, `inf`) makes a column `float`; codes with leading zeros and integers beyond 64 bits stay
 text; booleans, dates, times and timestamps are inferred only when every value is one (`27:15`
 is no time and `2024-02-30` no date; dates
 not in ISO form stay text with a note naming the format to declare; times with more than 6
@@ -200,8 +200,9 @@ Steps: `select`, `drop`, `rename`, `derive`, `filter`, `[left|right|full] join`,
 `normalize col { ... }` / `normalize col with mapping`. After a join, a column that exists on
 both inputs must be qualified (`clean_a.amount`); in the output, same-named columns (ignoring
 case) are renamed `<input>_<column>` (M112; a column made inside the pipeline counts as the
-pipeline's input, and `_2`, `_3`, ... is added if that name is taken). A right join's merged key
-is the right key; a full join's merged key is null when either key is. `join x on true` is a
+pipeline's input, and `_2`, `_3`, ... is added if that name is taken). A join's merged key is
+the key of whichever side has the row; it takes the right key's nullability in a right join, and
+is nullable in a full join when either key is. `join x on true` is a
 cross join (every row with every row, e.g. to attach a one-row dataset of totals); any other
 condition that never mentions `x` is reported (M121). `limit` requires a preceding `sort` (M118).
 
@@ -498,7 +499,8 @@ M122 — use decimals). Files are written under unique temporary names and moved
 after every step has succeeded, all together or none: a failed run changes no output file. Two
 exports naming the same file (also via `./` or `..`) are an error (M504). In `.xlsx` files,
 numbers an Excel number cannot hold exactly (integers beyond ±2^53, decimals with more than 15
-significant digits) are written as text, with warning M506.
+significant digits) and times or timestamps finer than a millisecond (Excel's limit; coarser
+ones keep their milliseconds) are written as text, with warning M506.
 
 ## BI models (Power BI)
 

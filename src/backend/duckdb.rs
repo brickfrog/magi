@@ -564,22 +564,20 @@ impl Builder {
                     ..Select::default()
                 }))
             }
-            LogicalPlan::Limit { input, n } => {
-                // keep ORDER BY and LIMIT in one SELECT so the kept rows are well defined
-                if let LogicalPlan::Sort { input: inner, keys } = input.as_ref() {
-                    let from = self.node(inner);
-                    return self.push(Query::select(Select {
-                        items: star(),
-                        from: Some((from, None)),
-                        order_by: order(keys),
-                        limit: Some(*n),
-                        ..Select::default()
-                    }));
-                }
-                let from = self.node(input);
+            LogicalPlan::Limit {
+                input,
+                n,
+                order: keys,
+            } => {
+                // ORDER BY and LIMIT in one SELECT, so the kept rows are well defined
+                let from = match input.as_ref() {
+                    LogicalPlan::Sort { input: inner, .. } => self.node(inner),
+                    _ => self.node(input),
+                };
                 self.push(Query::select(Select {
                     items: star(),
                     from: Some((from, None)),
+                    order_by: order(keys),
                     limit: Some(*n),
                     ..Select::default()
                 }))

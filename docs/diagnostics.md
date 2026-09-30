@@ -123,7 +123,7 @@ they name rows, cells and counts instead.
 | M503 | error | Invalid or duplicate sheet/table name. |
 | M504 | error | Two exports write the same file (paths compared after resolving `.`, `..` and existing links). |
 | M505 | error | An output file cannot be written (no output file is changed). |
-| M506 | warning | An XLSX export wrote numbers as text because an Excel number cannot hold them exactly (integers beyond ±2^53, e.g. UBIGINT/HUGEINT, and decimals with more than 15 significant digits); names the column and count. |
+| M506 | warning | An XLSX export wrote values as text because an Excel cell cannot hold them exactly (integers beyond ±2^53, e.g. UBIGINT/HUGEINT, decimals with more than 15 significant digits, times and timestamps finer than a millisecond); names the column and count. |
 
 ## BI models
 

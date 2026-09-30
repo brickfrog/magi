@@ -1,0 +1,4 @@
+# column `b` holds formulas whose results were never saved
+source t = excel("formulas.xlsx") { sheet: "Data" }
+
+export t to "out/formulas.csv"

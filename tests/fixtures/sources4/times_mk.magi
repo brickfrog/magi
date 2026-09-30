@@ -1,0 +1,9 @@
+source times = csv("times.csv") {
+    schema {
+        id: int
+        t: time
+        ts: timestamp
+    }
+}
+
+export times to "out/times.xlsx"

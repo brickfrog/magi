@@ -149,3 +149,40 @@ fn to_int_rounds_halves_the_same_way_for_every_type() {
         lines!["-3,-3,-3", "3,3,3"]
     );
 }
+
+/// Formula cells whose results were never saved (a workbook written by a program, not Excel)
+/// are named instead of being read as silent blanks.
+#[test]
+fn excel_formulas_without_results_are_reported() {
+    let fx = Fixture::new("sources4");
+    let out = fx.run_ok("formulas.magi");
+    out.assert_diagnostic("M201");
+    assert!(
+        out.stderr_flat()
+            .contains("2 formula cells without a saved result (first: C2, C3) read as null"),
+        "{}",
+        out.stderr
+    );
+}
+
+/// Times and timestamps keep their milliseconds in an xlsx export; finer values, which an Excel
+/// cell cannot hold, are written as text with a warning per column instead of being cut.
+#[test]
+fn xlsx_times_keep_their_precision() {
+    let fx = Fixture::new("sources4");
+    let out = fx.run_ok("times_mk.magi");
+    assert_eq!(
+        out.codes().iter().filter(|c| *c == "M506").count(),
+        2,
+        "{}",
+        out.stderr
+    );
+    fx.run_ok("times_read.magi");
+    assert_eq!(
+        fx.csv("out/times_back.csv").project(&["t", "ts"]),
+        lines![
+            "12:34:56.789000,2024-01-02 03:04:05.123000",
+            "23:59:59.999999,2024-01-02 03:04:05.123456"
+        ]
+    );
+}

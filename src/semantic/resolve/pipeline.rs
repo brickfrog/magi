@@ -720,7 +720,7 @@ impl<'a> Analyzer<'a> {
                 st.sort = None;
             }
             StepKind::Limit(n) => {
-                if st.sort.is_none() {
+                let Some(keys) = st.sort.clone() else {
                     self.err(
                         Diagnostic::error(
                             "M118",
@@ -730,10 +730,32 @@ impl<'a> Analyzer<'a> {
                         .help("sort first: `|> sort amount desc |> limit 10`"),
                     );
                     return None;
+                };
+                // the order the rows are kept in, repeated at the limit (steps between `sort` and
+                // `limit`, such as derive and filter, need not keep the rows' order in SQL): the
+                // sort keys, then every other column breaks ties, as at the sort
+                let mut order: Vec<OrderKey> = keys
+                    .iter()
+                    .filter_map(|(phys, desc)| {
+                        let c = st.scope.cols.iter().find(|c| &c.phys == phys)?;
+                        Some(OrderKey {
+                            expr: TExpr::col(0, phys.clone(), c.ty),
+                            desc: *desc,
+                        })
+                    })
+                    .collect();
+                for c in &st.scope.cols {
+                    if !keys.iter().any(|(p, _)| p == &c.phys) {
+                        order.push(OrderKey {
+                            expr: TExpr::col(0, c.phys.clone(), c.ty),
+                            desc: false,
+                        });
+                    }
                 }
                 st.plan = LogicalPlan::Limit {
                     input: Box::new(std::mem::replace(&mut st.plan, LogicalPlan::scan(""))),
                     n: *n,
+                    order,
                 };
             }
             StepKind::Union(rel) => {
