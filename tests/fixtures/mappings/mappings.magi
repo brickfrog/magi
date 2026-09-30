@@ -1,0 +1,44 @@
+# Category mappings: inline `normalize` arms, a named mapping used by `normalize ... with` and
+# `map()`, and a mapping without `otherwise` (unmapped values become null).
+
+source items = csv("items.csv") {
+    identity id
+    schema { id: int, category: string?, code: string? }
+}
+
+mapping categories {
+    "Firearm"          => "Firearms"
+    ["Gun", "Rifle"]   => "Firearms"
+    "Narcotic"         => "Drugs"
+    otherwise          => original
+}
+
+# no `otherwise`: anything not listed maps to null
+mapping codes {
+    "g" => "green"
+    "r" => "red"
+}
+
+dataset inline = items
+    |> normalize category {
+        ["Gun", "Rifle"] => "Firearms"
+        "Firearm"        => "Firearms"
+        otherwise        => original
+    }
+    |> select id, category
+    |> sort id
+
+dataset named = items
+    |> normalize category with categories
+    |> derive colour = map(code, codes)
+    |> select id, category, colour
+    |> sort id
+
+dataset per_category = named
+    |> group by category
+    |> aggregate { n = count() }
+    |> sort category
+
+export inline to "out/inline.csv"
+export named to "out/named.csv"
+export per_category to "out/per_category.csv"

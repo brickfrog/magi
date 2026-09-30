@@ -1,0 +1,6 @@
+source a = csv("a.csv")
+export a to "out/a.csv"
+export a to "out/../out/a.csv"
+export a to "./out/b.csv"
+export a to "out/b.csv"
+export a to "out/c.csv"

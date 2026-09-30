@@ -1,0 +1,37 @@
+# Measures over columns that a `dimension` renames, and counts with SQL null semantics.
+
+source sales_raw = csv("sales.csv") {
+    schema {
+        sale_id: int
+        customer_id: int
+        amount: decimal(12, 2)
+        qty: int
+    }
+}
+
+source customers_raw = csv("customers.csv")
+
+dataset sales = sales_raw |> derive { large = amount > 50 }
+dataset customers = customers_raw
+
+export sales to "out/sales.parquet"
+export customers to "out/customers.parquet"
+
+model renamed {
+    # declared before the dimensions that rename their columns
+    metric revenue {
+        value: sum(sales.amount)
+    }
+    metric regions {
+        value: count_distinct(customers.region)
+    }
+    metric large_sales {
+        value: count(sales.large)
+    }
+    metric large_share {
+        value: count(sales.large) / count()
+    }
+
+    dimension sale_amount = sales.amount
+    dimension area = customers.region
+}

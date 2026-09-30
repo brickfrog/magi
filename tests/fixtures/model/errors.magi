@@ -1,0 +1,9 @@
+source sales = csv("sales.csv")
+
+model broken {
+    table sales
+
+    metric share {
+        value: missing(sales.amount)
+    }
+}

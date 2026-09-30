@@ -1,0 +1,22 @@
+# A bank payout is the sum of up to 4 sales lines dated 1 to 3 days before it.
+#   a1 = b1 + b3 + b5 (b7 has the same amount but is dated 5 days before)
+#   a2 matches nothing; a3 = b8 + b9 (b10 is dated 9 days before)
+source bank = csv("bank.csv") { identity id }
+source gl = csv("gl.csv") { identity id }
+
+reconcile pay = bank as a with gl as b {
+    block by none
+
+    tier payout {
+        subset b max_items 4
+        require date_diff(b.date, a.date) >= 1 and date_diff(b.date, a.date) <= 3
+        require sum(b.amount) == a.amount
+        evidence { lines = count(b.id) }
+    }
+}
+
+export pay.matches to "out/pay_matches.csv"
+export pay.ambiguous to "out/pay_ambiguous.csv"
+export pay.unmatched_a to "out/pay_unmatched_a.csv"
+export pay.unmatched_b to "out/pay_unmatched_b.csv"
+export pay.summary to "out/pay_summary.csv"

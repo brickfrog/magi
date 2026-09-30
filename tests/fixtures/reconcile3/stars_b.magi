@@ -1,0 +1,49 @@
+# The star scenarios with the sides swapped: the centre is a class of side B (bank lines), the
+# leaves are classes of side A (GL receipts, split by `cust` and `entry`).
+#   eq_memo: 2 bank lines differing only in `memo` (not looked at) vs 2 receipts -> both matched
+#   twice:   1 bank line vs 1 receipt posted twice -> 1 match + 1 duplicate on side A
+source bank = csv("bank.csv")
+source gl = csv("gl.csv")
+
+dataset eq_memo_bank = bank |> filter scenario == "eq_memo"
+dataset eq_memo_gl = gl |> filter scenario == "eq_memo"
+dataset twice_bank = bank |> filter scenario == "twice"
+dataset twice_gl = gl |> filter scenario == "twice"
+
+reconcile eq_memo = eq_memo_gl as a with eq_memo_bank as b {
+    identity a: [ref, entry]
+    identity b: id
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = a.cust
+            posting = a.entry
+        }
+    }
+}
+
+reconcile twice = twice_gl as a with twice_bank as b {
+    identity a: [ref, entry]
+    identity b: id
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = a.cust
+            posting = a.entry
+        }
+    }
+}
+
+export eq_memo.matches to "out/eq_memo_matches.csv"
+export eq_memo.ambiguous to "out/eq_memo_ambiguous.csv"
+export eq_memo.unmatched_a to "out/eq_memo_unmatched_a.csv"
+export eq_memo.unmatched_b to "out/eq_memo_unmatched_b.csv"
+export eq_memo.summary to "out/eq_memo_summary.csv"
+
+export twice.matches to "out/twice_matches.csv"
+export twice.ambiguous to "out/twice_ambiguous.csv"
+export twice.unmatched_a to "out/twice_unmatched_a.csv"
+export twice.unmatched_b to "out/twice_unmatched_b.csv"
+export twice.summary to "out/twice_summary.csv"

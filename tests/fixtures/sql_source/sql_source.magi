@@ -1,0 +1,28 @@
+# Reading a DuckDB database file: a whole table, a query, and a query through a connection.
+
+source orders = duckdb("warehouse.duckdb") {
+    table: "orders"
+    identity id
+}
+
+source acme = duckdb("warehouse.duckdb") {
+    query: "SELECT id, amount FROM orders WHERE customer = 'acme'"
+    identity id
+}
+
+connection wh = duckdb { path: "warehouse.duckdb" }
+
+source per_customer = sql(wh) {
+    query: "SELECT customer, sum(amount) AS total FROM orders GROUP BY customer"
+    identity customer
+}
+
+dataset january = orders
+    |> filter day < date("2024-02-01")
+    |> select id, customer, amount
+    |> sort id
+
+export orders to "out/orders.csv"
+export acme to "out/acme.csv"
+export per_customer to "out/per_customer.csv"
+export january to "out/january.csv"

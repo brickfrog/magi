@@ -1,0 +1,19 @@
+# Every check fails except the last warning; the severity decides what the run does.
+
+source orders = csv("orders.csv") {
+    schema { id: int, customer: string?, amount: int }
+}
+
+validate orders {
+    require amount > 0 as "amounts are positive"
+    require customer not null
+    require unique(id)
+    require count() >= 10 as "at least ten orders"
+    warn sum(amount) > 0
+}
+
+dataset positive = orders |> filter amount > 0 |> sort id
+
+export positive to "out/positive.csv"
+export orders.failures to "out/failures.csv"
+export orders.checks to "out/checks.csv"

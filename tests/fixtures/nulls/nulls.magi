@@ -1,0 +1,56 @@
+# Null handling: comparisons with null are not true, null keys never join or block together.
+
+source a = csv("a.csv") {
+    identity id
+    schema { id: string, org: string?, amount: int? }
+}
+
+source b = csv("b.csv") {
+    identity id
+    schema { id: string, org: string?, amount: int? }
+}
+
+# `amount > 5` is null (not true) for a missing amount: the row is dropped
+dataset big = a |> filter amount > 5 |> select id, amount
+
+# the complement needs an explicit null test
+dataset no_amount = a |> filter amount is null |> select id
+
+# `!=` does not keep nulls either
+dataset not_org1 = a |> filter org != "ORG-1" |> select id, org
+
+# null org on both sides: an inner join does not pair them, a left join keeps A's row unpaired
+dataset inner_joined = a
+    |> join b on org
+    |> select a_id = a.id, b_id = b.id
+
+dataset left_joined = a
+    |> left join b on org
+    |> select a_id = a.id, b_id = b.id
+
+dataset filled = a |> derive amount_or_zero = coalesce(amount, 0) |> select id, amount_or_zero
+
+validate a {
+    warn org not null as "org present"
+    warn amount not null
+}
+
+# blocking on a null org never produces a candidate, even though a2 and b2 agree otherwise
+reconcile r = a with b {
+    block by org
+    tier exact { require a.amount == b.amount }
+    tier any_amount { }
+}
+
+export big to "out/big.csv"
+export no_amount to "out/no_amount.csv"
+export not_org1 to "out/not_org1.csv"
+export inner_joined to "out/inner_joined.csv"
+export left_joined to "out/left_joined.csv"
+export filled to "out/filled.csv"
+export a.failures to "out/failures.csv"
+export a.checks to "out/checks.csv"
+export r.matches to "out/matches.csv"
+export r.candidates to "out/candidates.csv"
+export r.unmatched_a to "out/unmatched_a.csv"
+export r.unmatched_b to "out/unmatched_b.csv"

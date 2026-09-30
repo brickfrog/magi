@@ -1,0 +1,4 @@
+source a = csv("u.csv")
+dataset d = a |> derive { __MAGI_N = 5 }
+validate d { warn unique(x) }
+export d to "out/d.csv"

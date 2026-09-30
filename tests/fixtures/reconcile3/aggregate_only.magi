@@ -1,0 +1,30 @@
+# Columns read only inside aggregates do not tell rows apart. The rollup tier counts rows by
+# their identity columns (it never matches); the bank lines and the receipts are still
+# interchangeable in the exact tier, so they are one class each and all match.
+source bank = csv("bank.csv")
+source gl = csv("gl.csv")
+
+dataset agg_bank = bank |> filter scenario == "agg"
+dataset agg_gl = gl |> filter scenario == "agg"
+
+reconcile agg = agg_bank as a with agg_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+
+    tier grouped {
+        many a to many b
+        group a by amount
+        group b by amount
+        require count(a.id) == 99 and count(b.ref) == 99
+    }
+
+    tier amount {
+        block by amount
+    }
+}
+
+export agg.matches to "out/agg_matches.csv"
+export agg.ambiguous to "out/agg_ambiguous.csv"
+export agg.unmatched_a to "out/agg_unmatched_a.csv"
+export agg.unmatched_b to "out/agg_unmatched_b.csv"
+export agg.summary to "out/agg_summary.csv"

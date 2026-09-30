@@ -1,0 +1,1060 @@
+---
+source: src/syntax/parser.rs
+expression: prog
+---
+Program {
+    statements: [
+        Source(
+            SourceDecl {
+                name: Ident {
+                    name: "a",
+                    span: Span {
+                        file: 0,
+                        start: 7,
+                        end: 8,
+                    },
+                    quoted: false,
+                },
+                kind: Ident {
+                    name: "csv",
+                    span: Span {
+                        file: 0,
+                        start: 11,
+                        end: 14,
+                    },
+                    quoted: false,
+                },
+                args: [
+                    Expr {
+                        kind: Literal(
+                            Str(
+                                "a.csv",
+                            ),
+                        ),
+                        span: Span {
+                            file: 0,
+                            start: 15,
+                            end: 22,
+                        },
+                    },
+                ],
+                options: [],
+                schema: Some(
+                    SchemaBlock {
+                        fields: [
+                            SchemaField {
+                                name: Ident {
+                                    name: "id",
+                                    span: Span {
+                                        file: 0,
+                                        start: 48,
+                                        end: 50,
+                                    },
+                                    quoted: false,
+                                },
+                                ty: TypeExpr {
+                                    name: Ident {
+                                        name: "string",
+                                        span: Span {
+                                            file: 0,
+                                            start: 52,
+                                            end: 58,
+                                        },
+                                        quoted: false,
+                                    },
+                                    params: [],
+                                    nullable: false,
+                                    span: Span {
+                                        file: 0,
+                                        start: 52,
+                                        end: 58,
+                                    },
+                                },
+                                span: Span {
+                                    file: 0,
+                                    start: 48,
+                                    end: 58,
+                                },
+                            },
+                            SchemaField {
+                                name: Ident {
+                                    name: "amount",
+                                    span: Span {
+                                        file: 0,
+                                        start: 60,
+                                        end: 66,
+                                    },
+                                    quoted: false,
+                                },
+                                ty: TypeExpr {
+                                    name: Ident {
+                                        name: "decimal",
+                                        span: Span {
+                                            file: 0,
+                                            start: 68,
+                                            end: 75,
+                                        },
+                                        quoted: false,
+                                    },
+                                    params: [
+                                        Int(
+                                            18,
+                                        ),
+                                        Int(
+                                            2,
+                                        ),
+                                    ],
+                                    nullable: true,
+                                    span: Span {
+                                        file: 0,
+                                        start: 68,
+                                        end: 83,
+                                    },
+                                },
+                                span: Span {
+                                    file: 0,
+                                    start: 60,
+                                    end: 83,
+                                },
+                            },
+                        ],
+                        span: Span {
+                            file: 0,
+                            start: 39,
+                            end: 85,
+                        },
+                    },
+                ),
+                identity: Some(
+                    [
+                        Ident {
+                            name: "id",
+                            span: Span {
+                                file: 0,
+                                start: 35,
+                                end: 37,
+                            },
+                            quoted: false,
+                        },
+                    ],
+                ),
+                span: Span {
+                    file: 0,
+                    start: 0,
+                    end: 87,
+                },
+            },
+        ),
+        Dataset(
+            DatasetDecl {
+                name: Ident {
+                    name: "clean",
+                    span: Span {
+                        file: 0,
+                        start: 96,
+                        end: 101,
+                    },
+                    quoted: false,
+                },
+                pipeline: Pipeline {
+                    head: Rel(
+                        RelRef {
+                            name: Ident {
+                                name: "a",
+                                span: Span {
+                                    file: 0,
+                                    start: 104,
+                                    end: 105,
+                                },
+                                quoted: false,
+                            },
+                            part: None,
+                            span: Span {
+                                file: 0,
+                                start: 104,
+                                end: 105,
+                            },
+                        },
+                    ),
+                    steps: [
+                        Step {
+                            kind: Derive(
+                                [
+                                    Assign {
+                                        name: Ident {
+                                            name: "k",
+                                            span: Span {
+                                                file: 0,
+                                                start: 116,
+                                                end: 117,
+                                            },
+                                            quoted: false,
+                                        },
+                                        expr: Expr {
+                                            kind: Call {
+                                                namespace: None,
+                                                name: Ident {
+                                                    name: "lower",
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 120,
+                                                        end: 125,
+                                                    },
+                                                    quoted: false,
+                                                },
+                                                args: [
+                                                    Expr {
+                                                        kind: Call {
+                                                            namespace: None,
+                                                            name: Ident {
+                                                                name: "trim",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 126,
+                                                                    end: 130,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                            args: [
+                                                                Expr {
+                                                                    kind: Column(
+                                                                        ColumnName {
+                                                                            qualifier: None,
+                                                                            name: Ident {
+                                                                                name: "kind",
+                                                                                span: Span {
+                                                                                    file: 0,
+                                                                                    start: 131,
+                                                                                    end: 135,
+                                                                                },
+                                                                                quoted: false,
+                                                                            },
+                                                                            span: Span {
+                                                                                file: 0,
+                                                                                start: 131,
+                                                                                end: 135,
+                                                                            },
+                                                                        },
+                                                                    ),
+                                                                    span: Span {
+                                                                        file: 0,
+                                                                        start: 131,
+                                                                        end: 135,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        },
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 126,
+                                                            end: 136,
+                                                        },
+                                                    },
+                                                ],
+                                            },
+                                            span: Span {
+                                                file: 0,
+                                                start: 120,
+                                                end: 137,
+                                            },
+                                        },
+                                        span: Span {
+                                            file: 0,
+                                            start: 116,
+                                            end: 137,
+                                        },
+                                    },
+                                ],
+                            ),
+                            span: Span {
+                                file: 0,
+                                start: 109,
+                                end: 137,
+                            },
+                        },
+                        Step {
+                            kind: Filter(
+                                Expr {
+                                    kind: Binary {
+                                        op: And,
+                                        left: Expr {
+                                            kind: Binary {
+                                                op: Gt,
+                                                left: Expr {
+                                                    kind: Column(
+                                                        ColumnName {
+                                                            qualifier: None,
+                                                            name: Ident {
+                                                                name: "amount",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 148,
+                                                                    end: 154,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 148,
+                                                                end: 154,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 148,
+                                                        end: 154,
+                                                    },
+                                                },
+                                                right: Expr {
+                                                    kind: Literal(
+                                                        Int(
+                                                            0,
+                                                        ),
+                                                    ),
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 157,
+                                                        end: 158,
+                                                    },
+                                                },
+                                            },
+                                            span: Span {
+                                                file: 0,
+                                                start: 148,
+                                                end: 158,
+                                            },
+                                        },
+                                        right: Expr {
+                                            kind: InList {
+                                                expr: Expr {
+                                                    kind: Column(
+                                                        ColumnName {
+                                                            qualifier: None,
+                                                            name: Ident {
+                                                                name: "k",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 163,
+                                                                    end: 164,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 163,
+                                                                end: 164,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 163,
+                                                        end: 164,
+                                                    },
+                                                },
+                                                list: [
+                                                    Expr {
+                                                        kind: Literal(
+                                                            Str(
+                                                                "x",
+                                                            ),
+                                                        ),
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 169,
+                                                            end: 172,
+                                                        },
+                                                    },
+                                                    Expr {
+                                                        kind: Literal(
+                                                            Str(
+                                                                "y",
+                                                            ),
+                                                        ),
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 174,
+                                                            end: 177,
+                                                        },
+                                                    },
+                                                ],
+                                                negated: false,
+                                            },
+                                            span: Span {
+                                                file: 0,
+                                                start: 163,
+                                                end: 178,
+                                            },
+                                        },
+                                    },
+                                    span: Span {
+                                        file: 0,
+                                        start: 148,
+                                        end: 178,
+                                    },
+                                },
+                            ),
+                            span: Span {
+                                file: 0,
+                                start: 141,
+                                end: 178,
+                            },
+                        },
+                    ],
+                    span: Span {
+                        file: 0,
+                        start: 104,
+                        end: 178,
+                    },
+                },
+                span: Span {
+                    file: 0,
+                    start: 88,
+                    end: 178,
+                },
+            },
+        ),
+        Validate(
+            ValidateDecl {
+                target: RelRef {
+                    name: Ident {
+                        name: "clean",
+                        span: Span {
+                            file: 0,
+                            start: 188,
+                            end: 193,
+                        },
+                        quoted: false,
+                    },
+                    part: None,
+                    span: Span {
+                        file: 0,
+                        start: 188,
+                        end: 193,
+                    },
+                },
+                checks: [
+                    Check {
+                        severity: Require,
+                        kind: NotNull(
+                            Expr {
+                                kind: Column(
+                                    ColumnName {
+                                        qualifier: None,
+                                        name: Ident {
+                                            name: "id",
+                                            span: Span {
+                                                file: 0,
+                                                start: 204,
+                                                end: 206,
+                                            },
+                                            quoted: false,
+                                        },
+                                        span: Span {
+                                            file: 0,
+                                            start: 204,
+                                            end: 206,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    file: 0,
+                                    start: 204,
+                                    end: 206,
+                                },
+                            },
+                        ),
+                        label: None,
+                        span: Span {
+                            file: 0,
+                            start: 196,
+                            end: 215,
+                        },
+                    },
+                    Check {
+                        severity: Expect,
+                        kind: Unique(
+                            [
+                                ColumnName {
+                                    qualifier: None,
+                                    name: Ident {
+                                        name: "id",
+                                        span: Span {
+                                            file: 0,
+                                            start: 231,
+                                            end: 233,
+                                        },
+                                        quoted: false,
+                                    },
+                                    span: Span {
+                                        file: 0,
+                                        start: 231,
+                                        end: 233,
+                                    },
+                                },
+                            ],
+                        ),
+                        label: Some(
+                            StrLit {
+                                value: "one row per id",
+                                span: Span {
+                                    file: 0,
+                                    start: 238,
+                                    end: 254,
+                                },
+                                block: false,
+                            },
+                        ),
+                        span: Span {
+                            file: 0,
+                            start: 217,
+                            end: 254,
+                        },
+                    },
+                ],
+                span: Span {
+                    file: 0,
+                    start: 179,
+                    end: 256,
+                },
+            },
+        ),
+        Reconcile(
+            ReconcileDecl {
+                name: Ident {
+                    name: "r",
+                    span: Span {
+                        file: 0,
+                        start: 267,
+                        end: 268,
+                    },
+                    quoted: false,
+                },
+                a: RelRef {
+                    name: Ident {
+                        name: "clean",
+                        span: Span {
+                            file: 0,
+                            start: 271,
+                            end: 276,
+                        },
+                        quoted: false,
+                    },
+                    part: None,
+                    span: Span {
+                        file: 0,
+                        start: 271,
+                        end: 276,
+                    },
+                },
+                a_alias: None,
+                b: RelRef {
+                    name: Ident {
+                        name: "clean",
+                        span: Span {
+                            file: 0,
+                            start: 282,
+                            end: 287,
+                        },
+                        quoted: false,
+                    },
+                    part: None,
+                    span: Span {
+                        file: 0,
+                        start: 282,
+                        end: 287,
+                    },
+                },
+                b_alias: Some(
+                    Ident {
+                        name: "b",
+                        span: Span {
+                            file: 0,
+                            start: 291,
+                            end: 292,
+                        },
+                        quoted: false,
+                    },
+                ),
+                items: [
+                    Block(
+                        Keys(
+                            [
+                                Same(
+                                    Ident {
+                                        name: "id",
+                                        span: Span {
+                                            file: 0,
+                                            start: 308,
+                                            end: 310,
+                                        },
+                                        quoted: false,
+                                    },
+                                ),
+                            ],
+                        ),
+                        Span {
+                            file: 0,
+                            start: 299,
+                            end: 310,
+                        },
+                    ),
+                    Tier(
+                        TierDecl {
+                            name: Ident {
+                                name: "exact",
+                                span: Span {
+                                    file: 0,
+                                    start: 320,
+                                    end: 325,
+                                },
+                                quoted: false,
+                            },
+                            items: [
+                                Require(
+                                    Expr {
+                                        kind: Binary {
+                                            op: Eq,
+                                            left: Expr {
+                                                kind: Column(
+                                                    ColumnName {
+                                                        qualifier: Some(
+                                                            Ident {
+                                                                name: "a",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 336,
+                                                                    end: 337,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                        ),
+                                                        name: Ident {
+                                                            name: "amount",
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 338,
+                                                                end: 344,
+                                                            },
+                                                            quoted: false,
+                                                        },
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 336,
+                                                            end: 344,
+                                                        },
+                                                    },
+                                                ),
+                                                span: Span {
+                                                    file: 0,
+                                                    start: 336,
+                                                    end: 344,
+                                                },
+                                            },
+                                            right: Expr {
+                                                kind: Column(
+                                                    ColumnName {
+                                                        qualifier: Some(
+                                                            Ident {
+                                                                name: "b",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 348,
+                                                                    end: 349,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                        ),
+                                                        name: Ident {
+                                                            name: "amount",
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 350,
+                                                                end: 356,
+                                                            },
+                                                            quoted: false,
+                                                        },
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 348,
+                                                            end: 356,
+                                                        },
+                                                    },
+                                                ),
+                                                span: Span {
+                                                    file: 0,
+                                                    start: 348,
+                                                    end: 356,
+                                                },
+                                            },
+                                        },
+                                        span: Span {
+                                            file: 0,
+                                            start: 336,
+                                            end: 356,
+                                        },
+                                    },
+                                ),
+                                Rank(
+                                    [
+                                        SortKey {
+                                            expr: Expr {
+                                                kind: Call {
+                                                    namespace: None,
+                                                    name: Ident {
+                                                        name: "similarity",
+                                                        span: Span {
+                                                            file: 0,
+                                                            start: 366,
+                                                            end: 376,
+                                                        },
+                                                        quoted: false,
+                                                    },
+                                                    args: [
+                                                        Expr {
+                                                            kind: Column(
+                                                                ColumnName {
+                                                                    qualifier: Some(
+                                                                        Ident {
+                                                                            name: "a",
+                                                                            span: Span {
+                                                                                file: 0,
+                                                                                start: 377,
+                                                                                end: 378,
+                                                                            },
+                                                                            quoted: false,
+                                                                        },
+                                                                    ),
+                                                                    name: Ident {
+                                                                        name: "k",
+                                                                        span: Span {
+                                                                            file: 0,
+                                                                            start: 379,
+                                                                            end: 380,
+                                                                        },
+                                                                        quoted: false,
+                                                                    },
+                                                                    span: Span {
+                                                                        file: 0,
+                                                                        start: 377,
+                                                                        end: 380,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 377,
+                                                                end: 380,
+                                                            },
+                                                        },
+                                                        Expr {
+                                                            kind: Column(
+                                                                ColumnName {
+                                                                    qualifier: Some(
+                                                                        Ident {
+                                                                            name: "b",
+                                                                            span: Span {
+                                                                                file: 0,
+                                                                                start: 382,
+                                                                                end: 383,
+                                                                            },
+                                                                            quoted: false,
+                                                                        },
+                                                                    ),
+                                                                    name: Ident {
+                                                                        name: "k",
+                                                                        span: Span {
+                                                                            file: 0,
+                                                                            start: 384,
+                                                                            end: 385,
+                                                                        },
+                                                                        quoted: false,
+                                                                    },
+                                                                    span: Span {
+                                                                        file: 0,
+                                                                        start: 382,
+                                                                        end: 385,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 382,
+                                                                end: 385,
+                                                            },
+                                                        },
+                                                    ],
+                                                },
+                                                span: Span {
+                                                    file: 0,
+                                                    start: 366,
+                                                    end: 386,
+                                                },
+                                            },
+                                            desc: true,
+                                            span: Span {
+                                                file: 0,
+                                                start: 366,
+                                                end: 391,
+                                            },
+                                        },
+                                    ],
+                                    Span {
+                                        file: 0,
+                                        start: 358,
+                                        end: 391,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                file: 0,
+                                start: 315,
+                                end: 393,
+                            },
+                        },
+                    ),
+                    Tier(
+                        TierDecl {
+                            name: Ident {
+                                name: "roll",
+                                span: Span {
+                                    file: 0,
+                                    start: 403,
+                                    end: 407,
+                                },
+                                quoted: false,
+                            },
+                            items: [
+                                Shape {
+                                    a_many: true,
+                                    b_many: false,
+                                    a_side: Ident {
+                                        name: "a",
+                                        span: Span {
+                                            file: 0,
+                                            start: 415,
+                                            end: 416,
+                                        },
+                                        quoted: false,
+                                    },
+                                    b_side: Ident {
+                                        name: "b",
+                                        span: Span {
+                                            file: 0,
+                                            start: 424,
+                                            end: 425,
+                                        },
+                                        quoted: false,
+                                    },
+                                    span: Span {
+                                        file: 0,
+                                        start: 410,
+                                        end: 425,
+                                    },
+                                },
+                                Group {
+                                    side: Ident {
+                                        name: "a",
+                                        span: Span {
+                                            file: 0,
+                                            start: 433,
+                                            end: 434,
+                                        },
+                                        quoted: false,
+                                    },
+                                    keys: [
+                                        Ident {
+                                            name: "id",
+                                            span: Span {
+                                                file: 0,
+                                                start: 438,
+                                                end: 440,
+                                            },
+                                            quoted: false,
+                                        },
+                                    ],
+                                    span: Span {
+                                        file: 0,
+                                        start: 427,
+                                        end: 440,
+                                    },
+                                },
+                                Compare(
+                                    [
+                                        Expr {
+                                            kind: Binary {
+                                                op: Eq,
+                                                left: Expr {
+                                                    kind: Call {
+                                                        namespace: None,
+                                                        name: Ident {
+                                                            name: "sum",
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 452,
+                                                                end: 455,
+                                                            },
+                                                            quoted: false,
+                                                        },
+                                                        args: [
+                                                            Expr {
+                                                                kind: Column(
+                                                                    ColumnName {
+                                                                        qualifier: Some(
+                                                                            Ident {
+                                                                                name: "a",
+                                                                                span: Span {
+                                                                                    file: 0,
+                                                                                    start: 456,
+                                                                                    end: 457,
+                                                                                },
+                                                                                quoted: false,
+                                                                            },
+                                                                        ),
+                                                                        name: Ident {
+                                                                            name: "amount",
+                                                                            span: Span {
+                                                                                file: 0,
+                                                                                start: 458,
+                                                                                end: 464,
+                                                                            },
+                                                                            quoted: false,
+                                                                        },
+                                                                        span: Span {
+                                                                            file: 0,
+                                                                            start: 456,
+                                                                            end: 464,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 456,
+                                                                    end: 464,
+                                                                },
+                                                            },
+                                                        ],
+                                                    },
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 452,
+                                                        end: 465,
+                                                    },
+                                                },
+                                                right: Expr {
+                                                    kind: Column(
+                                                        ColumnName {
+                                                            qualifier: Some(
+                                                                Ident {
+                                                                    name: "b",
+                                                                    span: Span {
+                                                                        file: 0,
+                                                                        start: 469,
+                                                                        end: 470,
+                                                                    },
+                                                                    quoted: false,
+                                                                },
+                                                            ),
+                                                            name: Ident {
+                                                                name: "amount",
+                                                                span: Span {
+                                                                    file: 0,
+                                                                    start: 471,
+                                                                    end: 477,
+                                                                },
+                                                                quoted: false,
+                                                            },
+                                                            span: Span {
+                                                                file: 0,
+                                                                start: 469,
+                                                                end: 477,
+                                                            },
+                                                        },
+                                                    ),
+                                                    span: Span {
+                                                        file: 0,
+                                                        start: 469,
+                                                        end: 477,
+                                                    },
+                                                },
+                                            },
+                                            span: Span {
+                                                file: 0,
+                                                start: 452,
+                                                end: 477,
+                                            },
+                                        },
+                                    ],
+                                    Span {
+                                        file: 0,
+                                        start: 442,
+                                        end: 479,
+                                    },
+                                ),
+                            ],
+                            span: Span {
+                                file: 0,
+                                start: 398,
+                                end: 481,
+                            },
+                        },
+                    ),
+                ],
+                span: Span {
+                    file: 0,
+                    start: 257,
+                    end: 483,
+                },
+            },
+        ),
+        Export(
+            ExportDecl {
+                target: Single(
+                    RelRef {
+                        name: Ident {
+                            name: "r",
+                            span: Span {
+                                file: 0,
+                                start: 491,
+                                end: 492,
+                            },
+                            quoted: false,
+                        },
+                        part: Some(
+                            Ident {
+                                name: "matches",
+                                span: Span {
+                                    file: 0,
+                                    start: 493,
+                                    end: 500,
+                                },
+                                quoted: false,
+                            },
+                        ),
+                        span: Span {
+                            file: 0,
+                            start: 491,
+                            end: 500,
+                        },
+                    },
+                ),
+                path: StrLit {
+                    value: "m.csv",
+                    span: Span {
+                        file: 0,
+                        start: 504,
+                        end: 511,
+                    },
+                    block: false,
+                },
+                options: [],
+                span: Span {
+                    file: 0,
+                    start: 484,
+                    end: 511,
+                },
+            },
+        ),
+    ],
+}

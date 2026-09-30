@@ -1,0 +1,2 @@
+source c = csv("ragged.csv")
+export c to "out/ragged.csv"

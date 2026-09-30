@@ -1,0 +1,7 @@
+source m = csv("m.csv") { schema { id: int w: int s: string } }
+dataset d = m |> derive {
+    l = lpad(s, w, "x")
+    r = rpad(s, length(s) + 2, "y")
+    o = round(to_float(w) / 3.0, w - 3)
+}
+export d to "d.csv"

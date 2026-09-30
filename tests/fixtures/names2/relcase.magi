@@ -1,0 +1,5 @@
+source Sales = csv("s.csv")
+dataset sales = Sales |> filter x >= 2
+dataset total = Sales |> group by v |> aggregate { n = count() }
+export sales to "out/sales.csv"
+export total to "out/total.csv"

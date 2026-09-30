@@ -1,0 +1,36 @@
+# Date boundaries: multi-format parsing, invalid calendar dates, leap days, month/year ends.
+
+source events = csv("events.csv") {
+    identity id
+    schema {
+        id: int
+        raw: date("%Y-%m-%d", "%m/%d/%Y")?
+        start: date("%Y-%m-%d")
+        finish: date("%Y-%m-%d")
+    }
+}
+
+source events_text = csv("events.csv") {
+    all_text: true
+    identity id
+}
+
+dataset parsed = events_text
+    |> derive day = parse_date(raw, "%Y-%m-%d", "%m/%d/%Y")
+    |> select id, raw, day
+    |> sort id
+
+dataset spans = events
+    |> derive {
+        gap = days_between(start, finish)
+        signed = date_diff(start, finish)
+        next_day = add_days(start, 1)
+        before_leap = start < date("2024-02-29")
+    }
+    |> select id, start, finish, gap, signed, next_day, before_leap
+    |> sort id
+
+export parsed to "out/parsed.csv"
+export spans to "out/spans.csv"
+export events to "out/declared.csv"
+export events.rejects to "out/rejects.csv"

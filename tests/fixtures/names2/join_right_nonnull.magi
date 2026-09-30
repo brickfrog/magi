@@ -1,0 +1,5 @@
+source l = csv("r.csv") { schema { id: int?  y: string } }
+source r = csv("l.csv") { schema { id: int  x: string } }
+dataset j = l |> right join r on id
+validate j { require id not null }
+export j to "out/j.csv"

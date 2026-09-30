@@ -1,0 +1,14 @@
+# the same 15 subsets exceed a budget of 14: the run stops before enumerating
+# (`sum(b.amount) - a.amount == 0` is no sum target, so the run counts every subset upfront)
+source ba = csv("budget_a.csv") { identity id }
+source bb = csv("budget_b.csv") { identity id }
+
+reconcile budget = ba as a with bb as b {
+    block by none
+    tier sums {
+        subset b max_items 2 max_subsets 14
+        require sum(b.amount) - a.amount == 0
+    }
+}
+
+export budget.summary to "out/budget_summary.csv"

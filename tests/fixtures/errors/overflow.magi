@@ -1,0 +1,5 @@
+source n = csv("overflow.csv") { schema { id: int, v: int, code: string } }
+
+dataset bumped = n |> derive w = v + 1
+
+export bumped to "out/bumped.csv"

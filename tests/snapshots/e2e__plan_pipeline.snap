@@ -1,0 +1,21 @@
+---
+source: tests/e2e.rs
+expression: fx.normalize(&out.stdout)
+---
+  1. Load source sales from CSV sales.csv; apply declared schema (5 columns)
+  2. Load source ledger from CSV ledger.csv; apply declared schema (4 columns)
+  3. Build dataset priced from sales (materialize as table)
+  4. Build dataset by_region from priced (materialize as table)
+  5. Build dataset unsorted from priced (materialize as table)
+  6. Build dataset totals from priced (materialize as table)
+  7. Reconcile books = priced with ledger (one_to_one, consume both, identity id / ref)
+  8.   tier 1 same_day: generate candidates (block by region; s.day == l.day; s.amount == l.value); select one_to_one (repeated until stable: one round per link of a preference chain); equally good candidates are reported as ambiguous; matched rows leave later tiers
+  9.   tier 2 any_day: generate candidates (block by region; s.amount == l.value); select one_to_one (repeated until stable: one round per link of a preference chain); equally good candidates are reported as ambiguous; matched rows leave later tiers
+ 10.   produce books.matches, .unmatched_a, .unmatched_b, .candidates, .ambiguous, .summary
+ 11. Export by_region to out/by_region.csv
+ 12. Export unsorted to out/unsorted.csv
+ 13. Export totals to out/totals.csv
+ 14. Export totals to out/totals.parquet
+ 15. Export books.matches to out/matches.csv
+ 16. Export books.summary to out/summary.csv
+ 17. Export totals, books.matches to out/report.xlsx

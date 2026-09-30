@@ -1,0 +1,11 @@
+source lines = csv("lines.csv") {
+    all_text: true
+    identity id
+}
+
+dataset totals = lines |> aggregate { n = count() }
+
+# the condition never looks at `totals`: probably a mistake
+dataset joined = lines |> join totals on lines.id == lines.id
+
+export joined to "out/joined.csv"

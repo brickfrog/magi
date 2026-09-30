@@ -1,0 +1,7 @@
+# The second export cannot be written (its directory would be inside a file): the run fails
+# and the first export must not replace the existing file either.
+
+source sales = csv("sales.csv")
+
+export sales to "out/first.csv"
+export sales to "sales.csv/second.csv"

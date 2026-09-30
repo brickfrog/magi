@@ -1,0 +1,17 @@
+ref,entry,scenario,amount,cust
+R1,1,eq,3150.25,Acme
+R2,1,eq,3150.25,Birch
+R3,1,twice,500.00,Acme
+R3,2,twice,500.00,Acme
+R4,1,generic,700.00,Acme
+R5,1,generic,700.00,Birch
+R6,1,three,900.00,Acme
+R7,1,three,900.00,Birch
+R8,1,three_exact,950.00,Acme
+R9,1,three_exact,950.00,Birch
+R10,1,shared_leaf,100.00,Acme
+R11,1,shared_leaf,99.00,Birch
+R12,1,eq_memo,1200.00,Acme
+R13,1,eq_memo,1200.00,Birch
+R14,1,agg,60.00,Acme
+R15,1,agg,60.00,Acme

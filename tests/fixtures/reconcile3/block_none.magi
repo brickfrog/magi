@@ -1,0 +1,17 @@
+# `block by none` in a tier or for the whole reconciliation: comparing every pair is intended.
+source bank = csv("bank.csv") { identity id }
+source gl = csv("gl.csv") { identity [ref, entry] }
+
+reconcile in_tier = bank as a with gl as b {
+    block by scenario
+    tier exact { require a.amount == b.amount }
+    tier any_scenario {
+        block by none
+        require a.amount == b.amount
+    }
+}
+
+reconcile for_all = bank as a with gl as b {
+    block by none
+    tier exact { require a.amount == b.amount }
+}

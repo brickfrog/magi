@@ -1,0 +1,10 @@
+source l = csv("l.csv") { identity id }
+source r = csv("r.csv") { identity id }
+reconcile m = l with r {
+    tier t {
+        require l.amt == -(-r.amt)
+        rank by -(-r.id)
+        evidence { e = -(-r.amt) }
+    }
+}
+export m.matches to "matches.csv"

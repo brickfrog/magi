@@ -1,0 +1,18 @@
+# Declaring the types turns unreadable cells into nulls listed in `mixed.rejects`, and
+# `header_row` points at the real header.
+
+source mixed = excel("workbook.xlsx") {
+    sheet: "Mixed"
+    identity id
+    schema { id: int, amount: decimal(10,2)?, note: string }
+}
+
+source report = excel("workbook.xlsx") {
+    sheet: "Report"
+    header_row: 3
+    identity id
+}
+
+export mixed to "out/mixed.csv"
+export mixed.rejects to "out/rejects.csv"
+export report to "out/report.csv"

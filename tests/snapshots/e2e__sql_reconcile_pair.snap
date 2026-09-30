@@ -1,0 +1,1301 @@
+---
+source: tests/e2e.rs
+expression: fx.normalize(&out.stdout)
+---
+-- reconcile pair: setup
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_a" AS
+SELECT *, dense_rank() OVER (ORDER BY "ref" ASC NULLS LAST) AS "__magi_id", dense_rank() OVER (ORDER BY "region" ASC NULLS LAST, "value" ASC NULLS LAST) AS "__magi_cls", dense_rank() OVER (ORDER BY "region" ASC NULLS LAST, "value" ASC NULLS LAST) AS "__magi_exact"
+FROM "left";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_b" AS
+SELECT *, dense_rank() OVER (ORDER BY "ref" ASC NULLS LAST) AS "__magi_id", dense_rank() OVER (ORDER BY "region" ASC NULLS LAST, "value" ASC NULLS LAST) AS "__magi_cls", dense_rank() OVER (ORDER BY "region" ASC NULLS LAST, "value" ASC NULLS LAST) AS "__magi_exact"
+FROM "right";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_links" ("a_id" BIGINT, "b_id" BIGINT, "tier_index" INTEGER, "a_group" BIGINT, "b_group" BIGINT, "kind" VARCHAR, "amb_group" VARCHAR, "cand_a" BIGINT, "cand_b" BIGINT, "candidate_rank" BIGINT, "rank_values" VARCHAR);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_cands" ("a_id" BIGINT, "b_id" BIGINT, "tier_index" INTEGER, "a_group" BIGINT, "b_group" BIGINT, "candidate_rank" BIGINT, "rank_values" VARCHAR);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_dups_a" ("id" BIGINT, "dup_of" BIGINT, "tier_index" INTEGER);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_dups_b" ("id" BIGINT, "dup_of" BIGINT, "tier_index" INTEGER);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_held_a" ("id" BIGINT, "status" VARCHAR, "dup_of" BIGINT, "tier_index" INTEGER);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_held_b" ("id" BIGINT, "status" VARCHAR, "dup_of" BIGINT, "tier_index" INTEGER);
+
+-- identity check for side l (must return rows = ids and null_ids = 0)
+SELECT count(*) AS "rows", count(DISTINCT "__magi_id") AS "ids", sum(CASE WHEN "ref" IS NULL THEN 1 ELSE 0 END) AS "null_ids"
+FROM "__magi_rc_pair_a";
+
+-- identity check for side r (must return rows = ids and null_ids = 0)
+SELECT count(*) AS "rows", count(DISTINCT "__magi_id") AS "ids", sum(CASE WHEN "ref" IS NULL THEN 1 ELSE 0 END) AS "null_ids"
+FROM "__magi_rc_pair_b";
+
+-- tier 1 exact
+-- exact: block by region; l.value == r.value
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_ua" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_a" AS "l"
+  ANTI JOIN "__magi_rc_pair_held_a" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_3" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  ANTI JOIN "__magi_step_2" AS "r" ON "l"."__magi_id" = "r"."a_id"
+)
+SELECT "__magi_id" AS "__magi_unit",
+       "__magi_cls",
+       "__magi_exact",
+       "ref",
+       "region",
+       "value"
+FROM "__magi_step_3";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_ub" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_b" AS "l"
+  ANTI JOIN "__magi_rc_pair_held_b" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_3" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  ANTI JOIN "__magi_step_2" AS "r" ON "l"."__magi_id" = "r"."b_id"
+)
+SELECT "__magi_id" AS "__magi_unit",
+       "__magi_cls",
+       "__magi_exact",
+       "ref",
+       "region",
+       "value"
+FROM "__magi_step_3";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_cand" AS
+WITH "__magi_step_1" AS (
+  SELECT "l"."__magi_unit" AS "a_unit",
+         "r"."__magi_unit" AS "b_unit",
+         "l"."__magi_cls" AS "a_cls",
+         "r"."__magi_cls" AS "b_cls",
+         "l"."__magi_exact" AS "a_exact",
+         "r"."__magi_exact" AS "b_exact"
+  FROM "__magi_rc_pair_t1_ua" AS "l"
+  JOIN "__magi_rc_pair_t1_ub" AS "r" ON "l"."region" = "r"."region" AND "l"."value" = "r"."value"
+)
+SELECT *,
+       count(*) OVER (PARTITION BY "a_unit") AS "cand_a",
+       count(*) OVER (PARTITION BY "b_unit") AS "cand_b",
+       rank() OVER (PARTITION BY "a_unit") AS "candidate_rank",
+       TRY_CAST(NULL AS VARCHAR) AS "rank_values"
+FROM "__magi_step_1";
+
+INSERT INTO "__magi_rc_pair_cands" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "candidate_rank",
+         "rank_values",
+         "a_unit" AS "a_id",
+         NULL AS "a_group"
+  FROM "__magi_rc_pair_t1_cand"
+),
+"__magi_step_2" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "candidate_rank",
+         "rank_values",
+         "a_id",
+         "a_group",
+         "b_unit" AS "b_id",
+         NULL AS "b_group"
+  FROM "__magi_step_1"
+)
+SELECT "a_id",
+       "b_id",
+       1 AS "tier_index",
+       "a_group",
+       "b_group",
+       "candidate_rank",
+       "rank_values"
+FROM "__magi_step_2";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_done_a" ("unit" BIGINT);
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_done_b" ("unit" BIGINT);
+
+-- repeat:
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_ce" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_cand" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_a" AS "r" ON "l"."a_unit" = "r"."unit"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_b" AS "r" ON "l"."b_unit" = "r"."unit"
+),
+"__magi_step_3" AS (
+  SELECT "a_cls", "b_cls"
+  FROM "__magi_step_2"
+)
+SELECT DISTINCT *
+FROM "__magi_step_3";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_best" AS
+WITH "__magi_step_1" AS (
+  SELECT *, rank() OVER (PARTITION BY "a_cls") AS "ra", rank() OVER (PARTITION BY "b_cls") AS "rb"
+  FROM "__magi_rc_pair_t1_ce"
+)
+SELECT *, count(*) FILTER (WHERE "ra" = 1) OVER (PARTITION BY "a_cls") AS "na_best", count(*) FILTER (WHERE "rb" = 1) OVER (PARTITION BY "b_cls") AS "nb_best"
+FROM "__magi_step_1";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_mutual" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_best"
+  WHERE "ra" = 1 AND "rb" = 1 AND "na_best" = 1 AND "nb_best" = 1
+),
+"__magi_step_2" AS (
+  SELECT "a_cls", "b_cls", 2 * "a_cls" AS "grp", FALSE AS "star"
+  FROM "__magi_step_1"
+),
+"__magi_step_3" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_best"
+  WHERE "ra" = 1 AND "na_best" > 1
+),
+"__magi_step_4" AS (
+  SELECT *, count(*) FILTER (WHERE "rb" = 1 AND "nb_best" = 1) OVER (PARTITION BY "a_cls") AS "leaves"
+  FROM "__magi_step_3"
+),
+"__magi_step_5" AS (
+  SELECT *
+  FROM "__magi_step_4"
+  WHERE "leaves" = "na_best"
+),
+"__magi_step_6" AS (
+  SELECT "a_cls", "b_cls", 2 * "a_cls" + 0 AS "grp", TRUE AS "star"
+  FROM "__magi_step_5"
+),
+"__magi_step_7" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_best"
+  WHERE "rb" = 1 AND "nb_best" > 1
+),
+"__magi_step_8" AS (
+  SELECT *, count(*) FILTER (WHERE "ra" = 1 AND "na_best" = 1) OVER (PARTITION BY "b_cls") AS "leaves"
+  FROM "__magi_step_7"
+),
+"__magi_step_9" AS (
+  SELECT *
+  FROM "__magi_step_8"
+  WHERE "leaves" = "nb_best"
+),
+"__magi_step_10" AS (
+  SELECT "a_cls", "b_cls", 2 * "b_cls" + 1 AS "grp", TRUE AS "star"
+  FROM "__magi_step_9"
+)
+SELECT *
+FROM "__magi_step_2"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_6"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_10";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_rma" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_ua" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_a" AS "r" ON "l"."__magi_unit" = "r"."unit"
+),
+"__magi_step_2" AS (
+  SELECT "a_cls" AS "cls", "grp"
+  FROM "__magi_rc_pair_t1_mutual"
+),
+"__magi_step_3" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_2"
+),
+"__magi_step_4" AS (
+  SELECT "l"."__magi_unit" AS "unit", "l"."__magi_cls" AS "cls", "l"."__magi_exact" AS "exact", "r"."grp"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_3" AS "r" ON "l"."__magi_cls" = "r"."cls"
+),
+"__magi_step_5" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_6" AS (
+  SELECT "a_id" AS "id"
+  FROM "__magi_step_5"
+),
+"__magi_step_7" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_6"
+),
+"__magi_step_8" AS (
+  SELECT "l"."unit",
+         "l"."cls",
+         "l"."exact",
+         "l"."grp",
+         "r"."id" IS NOT NULL AS "seen"
+  FROM "__magi_step_4" AS "l"
+  LEFT JOIN "__magi_step_7" AS "r" ON "l"."unit" = "r"."id"
+)
+SELECT *, row_number() OVER (PARTITION BY "grp" ORDER BY "seen" ASC NULLS LAST, "unit" ASC NULLS LAST) AS "rn"
+FROM "__magi_step_8";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_rmb" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_ub" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_b" AS "r" ON "l"."__magi_unit" = "r"."unit"
+),
+"__magi_step_2" AS (
+  SELECT "b_cls" AS "cls", "grp"
+  FROM "__magi_rc_pair_t1_mutual"
+),
+"__magi_step_3" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_2"
+),
+"__magi_step_4" AS (
+  SELECT "l"."__magi_unit" AS "unit", "l"."__magi_cls" AS "cls", "l"."__magi_exact" AS "exact", "r"."grp"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_3" AS "r" ON "l"."__magi_cls" = "r"."cls"
+),
+"__magi_step_5" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_6" AS (
+  SELECT "b_id" AS "id"
+  FROM "__magi_step_5"
+),
+"__magi_step_7" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_6"
+),
+"__magi_step_8" AS (
+  SELECT "l"."unit",
+         "l"."cls",
+         "l"."exact",
+         "l"."grp",
+         "r"."id" IS NOT NULL AS "seen"
+  FROM "__magi_step_4" AS "l"
+  LEFT JOIN "__magi_step_7" AS "r" ON "l"."unit" = "r"."id"
+)
+SELECT *, row_number() OVER (PARTITION BY "grp" ORDER BY "seen" ASC NULLS LAST, "unit" ASC NULLS LAST) AS "rn"
+FROM "__magi_step_8";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_pairs" AS
+WITH "__magi_step_1" AS (
+  SELECT "grp", "star"
+  FROM "__magi_rc_pair_t1_mutual"
+),
+"__magi_step_2" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_1"
+),
+"__magi_step_3" AS (
+  SELECT "grp", count(*) AS "na", min("exact") = max("exact") AS "a_exact", min(CASE WHEN "rn" = 1 THEN "unit" END) AS "a_first"
+  FROM "__magi_rc_pair_t1_rma"
+  GROUP BY 1
+),
+"__magi_step_4" AS (
+  SELECT "l"."grp",
+         "l"."star",
+         "r"."na",
+         "r"."a_exact",
+         "r"."a_first"
+  FROM "__magi_step_2" AS "l"
+  JOIN "__magi_step_3" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_5" AS (
+  SELECT "grp", count(*) AS "nb", min("exact") = max("exact") AS "b_exact", min(CASE WHEN "rn" = 1 THEN "unit" END) AS "b_first"
+  FROM "__magi_rc_pair_t1_rmb"
+  GROUP BY 1
+),
+"__magi_step_6" AS (
+  SELECT "l"."grp",
+         "l"."star",
+         "l"."na",
+         "l"."a_exact",
+         "l"."a_first",
+         "r"."nb",
+         "r"."b_exact",
+         "r"."b_first"
+  FROM "__magi_step_4" AS "l"
+  JOIN "__magi_step_5" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_7" AS (
+  SELECT "grp",
+         "star",
+         "na",
+         "nb",
+         "a_first",
+         "b_first",
+         "na" = "nb" OR ("na" > "nb" AND "a_exact" OR "nb" > "na" AND "b_exact") AS "ok"
+  FROM "__magi_step_6"
+)
+SELECT *
+FROM "__magi_step_7"
+WHERE "ok" OR (NOT "star");
+
+-- if "__magi_rc_pair_t1_pairs" has rows: commit and repeat
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_sel" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l"."grp", "r"."unit" AS "a_unit", "r"."rn"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_rc_pair_t1_rma" AS "r" ON "l"."grp" = "r"."grp"
+)
+SELECT "l"."a_unit", "r"."unit" AS "b_unit"
+FROM "__magi_step_2" AS "l"
+JOIN "__magi_rc_pair_t1_rmb" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" = "r"."rn";
+
+INSERT INTO "__magi_rc_pair_links" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT "l"."a_unit",
+         "l"."b_unit",
+         "r"."cand_a",
+         "r"."cand_b",
+         "r"."candidate_rank",
+         "r"."rank_values"
+  FROM "__magi_rc_pair_t1_sel" AS "l"
+  JOIN "__magi_rc_pair_t1_cand" AS "r" ON "l"."a_unit" = "r"."a_unit" AND "l"."b_unit" = "r"."b_unit"
+),
+"__magi_step_2" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "a_unit" AS "a_id",
+         NULL AS "a_group"
+  FROM "__magi_step_1"
+),
+"__magi_step_3" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "a_id",
+         "a_group",
+         "b_unit" AS "b_id",
+         NULL AS "b_group"
+  FROM "__magi_step_2"
+)
+SELECT "a_id",
+       "b_id",
+       1 AS "tier_index",
+       "a_group",
+       "b_group",
+       'match' AS "kind",
+       NULL AS "amb_group",
+       "cand_a",
+       "cand_b",
+       "candidate_rank",
+       "rank_values"
+FROM "__magi_step_3";
+
+INSERT INTO "__magi_rc_pair_dups_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rma"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "na" > "nb"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."a_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."nb"
+)
+SELECT "unit" AS "id", "first" AS "dup_of", 1 AS "tier_index"
+FROM "__magi_step_3";
+
+INSERT INTO "__magi_rc_pair_held_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rma"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "na" > "nb"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."a_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."nb"
+),
+"__magi_step_4" AS (
+  SELECT "unit" AS "id", "first" AS "dup_of"
+  FROM "__magi_step_3"
+)
+SELECT "id", 'duplicate' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_4";
+
+INSERT INTO "__magi_rc_pair_t1_done_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rma"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "na" > "nb"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."a_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."nb"
+)
+SELECT "unit"
+FROM "__magi_step_3";
+
+INSERT INTO "__magi_rc_pair_dups_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rmb"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "nb" > "na"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."b_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."na"
+)
+SELECT "unit" AS "id", "first" AS "dup_of", 1 AS "tier_index"
+FROM "__magi_step_3";
+
+INSERT INTO "__magi_rc_pair_held_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rmb"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "nb" > "na"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."b_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."na"
+),
+"__magi_step_4" AS (
+  SELECT "unit" AS "id", "first" AS "dup_of"
+  FROM "__magi_step_3"
+)
+SELECT "id", 'duplicate' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_4";
+
+INSERT INTO "__magi_rc_pair_t1_done_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_rmb"
+  WHERE NOT "seen"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE "ok" AND "nb" > "na"
+),
+"__magi_step_3" AS (
+  SELECT "l"."unit", "r"."b_first" AS "first"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_step_2" AS "r" ON "l"."grp" = "r"."grp" AND "l"."rn" > "r"."na"
+)
+SELECT "unit"
+FROM "__magi_step_3";
+
+INSERT INTO "__magi_rc_pair_links" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE NOT "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l"."grp", "r"."cls" AS "a_cls", "r"."unit" AS "a_unit"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_rc_pair_t1_rma" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_3" AS (
+  SELECT "l"."a_unit", "r"."unit" AS "b_unit", concat('p', CAST("l"."a_cls" AS VARCHAR), '-', CAST("r"."cls" AS VARCHAR)) AS "amb_group"
+  FROM "__magi_step_2" AS "l"
+  JOIN "__magi_rc_pair_t1_rmb" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_4" AS (
+  SELECT "l"."a_unit",
+         "l"."b_unit",
+         "l"."amb_group",
+         "r"."cand_a",
+         "r"."cand_b",
+         "r"."candidate_rank",
+         "r"."rank_values"
+  FROM "__magi_step_3" AS "l"
+  JOIN "__magi_rc_pair_t1_cand" AS "r" ON "l"."a_unit" = "r"."a_unit" AND "l"."b_unit" = "r"."b_unit"
+),
+"__magi_step_5" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "amb_group",
+         "a_unit" AS "a_id",
+         NULL AS "a_group"
+  FROM "__magi_step_4"
+),
+"__magi_step_6" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "amb_group",
+         "a_id",
+         "a_group",
+         "b_unit" AS "b_id",
+         NULL AS "b_group"
+  FROM "__magi_step_5"
+)
+SELECT "a_id",
+       "b_id",
+       1 AS "tier_index",
+       "a_group",
+       "b_group",
+       'ambiguous' AS "kind",
+       "amb_group",
+       "cand_a",
+       "cand_b",
+       "candidate_rank",
+       "rank_values"
+FROM "__magi_step_6";
+
+INSERT INTO "__magi_rc_pair_held_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE NOT "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_rma" AS "l"
+  SEMI JOIN "__magi_step_1" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_3" AS (
+  SELECT "unit"
+  FROM "__magi_step_2"
+),
+"__magi_step_4" AS (
+  SELECT "unit" AS "id", NULL AS "dup_of"
+  FROM "__magi_step_3"
+)
+SELECT "id", 'ambiguous' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_4";
+
+INSERT INTO "__magi_rc_pair_t1_done_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE NOT "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_rma" AS "l"
+  SEMI JOIN "__magi_step_1" AS "r" ON "l"."grp" = "r"."grp"
+)
+SELECT "unit"
+FROM "__magi_step_2";
+
+INSERT INTO "__magi_rc_pair_held_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE NOT "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_rmb" AS "l"
+  SEMI JOIN "__magi_step_1" AS "r" ON "l"."grp" = "r"."grp"
+),
+"__magi_step_3" AS (
+  SELECT "unit"
+  FROM "__magi_step_2"
+),
+"__magi_step_4" AS (
+  SELECT "unit" AS "id", NULL AS "dup_of"
+  FROM "__magi_step_3"
+)
+SELECT "id", 'ambiguous' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_4";
+
+INSERT INTO "__magi_rc_pair_t1_done_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_pairs"
+  WHERE NOT "ok"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_rmb" AS "l"
+  SEMI JOIN "__magi_step_1" AS "r" ON "l"."grp" = "r"."grp"
+)
+SELECT "unit"
+FROM "__magi_step_2";
+
+INSERT INTO "__magi_rc_pair_t1_done_a" BY NAME
+SELECT "a_unit" AS "unit"
+FROM "__magi_rc_pair_t1_sel";
+
+INSERT INTO "__magi_rc_pair_t1_done_b" BY NAME
+SELECT "b_unit" AS "unit"
+FROM "__magi_rc_pair_t1_sel";
+
+-- otherwise look for tied best candidates:
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_tied" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_best"
+  WHERE "ra" = 1 AND "na_best" > 1
+),
+"__magi_step_2" AS (
+  SELECT "a_cls", "b_cls", concat('a', CAST("a_cls" AS VARCHAR)) AS "amb_group"
+  FROM "__magi_step_1"
+),
+"__magi_step_3" AS (
+  SELECT *
+  FROM "__magi_rc_pair_t1_best"
+  WHERE "rb" = 1 AND "nb_best" > 1
+),
+"__magi_step_4" AS (
+  SELECT "a_cls", "b_cls", concat('b', CAST("b_cls" AS VARCHAR)) AS "amb_group"
+  FROM "__magi_step_3"
+)
+SELECT *
+FROM "__magi_step_2"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_4";
+
+-- if "__magi_rc_pair_t1_tied" has rows: record ambiguities and repeat; otherwise the tier is done
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_tua" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_ua" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_a" AS "r" ON "l"."__magi_unit" = "r"."unit"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  SEMI JOIN "__magi_rc_pair_t1_tied" AS "r" ON "l"."__magi_cls" = "r"."a_cls"
+)
+SELECT "__magi_unit" AS "unit", "__magi_cls" AS "cls"
+FROM "__magi_step_2";
+
+CREATE OR REPLACE TEMP TABLE "__magi_rc_pair_t1_tub" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_t1_ub" AS "l"
+  ANTI JOIN "__magi_rc_pair_t1_done_b" AS "r" ON "l"."__magi_unit" = "r"."unit"
+),
+"__magi_step_2" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  SEMI JOIN "__magi_rc_pair_t1_tied" AS "r" ON "l"."__magi_cls" = "r"."b_cls"
+)
+SELECT "__magi_unit" AS "unit", "__magi_cls" AS "cls"
+FROM "__magi_step_2";
+
+INSERT INTO "__magi_rc_pair_links" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT "l"."b_cls", "l"."amb_group", "r"."unit" AS "a_unit"
+  FROM "__magi_rc_pair_t1_tied" AS "l"
+  JOIN "__magi_rc_pair_t1_tua" AS "r" ON "l"."a_cls" = "r"."cls"
+),
+"__magi_step_2" AS (
+  SELECT "l"."a_unit", "r"."unit" AS "b_unit", "l"."amb_group"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_rc_pair_t1_tub" AS "r" ON "l"."b_cls" = "r"."cls"
+),
+"__magi_step_3" AS (
+  SELECT "l".*
+  FROM "__magi_step_2" AS "l"
+  SEMI JOIN "__magi_rc_pair_t1_cand" AS "r" ON "l"."a_unit" = "r"."a_unit" AND "l"."b_unit" = "r"."b_unit"
+),
+"__magi_step_4" AS (
+  SELECT "l"."a_unit",
+         "l"."b_unit",
+         "l"."amb_group",
+         "r"."cand_a",
+         "r"."cand_b",
+         "r"."candidate_rank",
+         "r"."rank_values"
+  FROM "__magi_step_3" AS "l"
+  JOIN "__magi_rc_pair_t1_cand" AS "r" ON "l"."a_unit" = "r"."a_unit" AND "l"."b_unit" = "r"."b_unit"
+),
+"__magi_step_5" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "amb_group",
+         "a_unit" AS "a_id",
+         NULL AS "a_group"
+  FROM "__magi_step_4"
+),
+"__magi_step_6" AS (
+  SELECT "a_unit",
+         "b_unit",
+         "cand_a",
+         "cand_b",
+         "candidate_rank",
+         "rank_values",
+         "amb_group",
+         "a_id",
+         "a_group",
+         "b_unit" AS "b_id",
+         NULL AS "b_group"
+  FROM "__magi_step_5"
+)
+SELECT "a_id",
+       "b_id",
+       1 AS "tier_index",
+       "a_group",
+       "b_group",
+       'ambiguous' AS "kind",
+       "amb_group",
+       "cand_a",
+       "cand_b",
+       "candidate_rank",
+       "rank_values"
+FROM "__magi_step_6";
+
+INSERT INTO "__magi_rc_pair_held_a" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT "unit" AS "id", NULL AS "dup_of"
+  FROM "__magi_rc_pair_t1_tua"
+)
+SELECT "id", 'ambiguous' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_1";
+
+INSERT INTO "__magi_rc_pair_t1_done_a" BY NAME
+SELECT "unit"
+FROM "__magi_rc_pair_t1_tua";
+
+INSERT INTO "__magi_rc_pair_held_b" BY NAME
+WITH "__magi_step_1" AS (
+  SELECT "unit" AS "id", NULL AS "dup_of"
+  FROM "__magi_rc_pair_t1_tub"
+)
+SELECT "id", 'ambiguous' AS "status", "dup_of", 1 AS "tier_index"
+FROM "__magi_step_1";
+
+INSERT INTO "__magi_rc_pair_t1_done_b" BY NAME
+SELECT "unit"
+FROM "__magi_rc_pair_t1_tub";
+
+-- outputs
+CREATE OR REPLACE TEMP TABLE "pair.matches" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_2" AS (
+  SELECT "l"."a_id",
+         "l"."b_id",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."kind",
+         "l"."amb_group",
+         "l"."cand_a",
+         "l"."cand_b",
+         "l"."candidate_rank",
+         "l"."rank_values",
+         "r"."__magi_id" AS "__magi_a___magi_id",
+         "r"."ref" AS "__magi_a_ref",
+         "r"."region" AS "__magi_a_region",
+         "r"."value" AS "__magi_a_value"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_rc_pair_a" AS "r" ON "l"."a_id" = "r"."__magi_id"
+),
+"__magi_step_3" AS (
+  SELECT CASE WHEN "l"."tier_index" = 1 THEN 'exact' END AS "tier",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."__magi_a_ref" AS "l_ref",
+         "r"."ref" AS "r_ref",
+         '' AS "flags",
+         "l"."cand_a" AS "candidates_a",
+         "l"."cand_b" AS "candidates_b",
+         "l"."candidate_rank",
+         "l"."rank_values",
+         CASE WHEN "l"."tier_index" = 1 THEN 'exact: block by region; l.value == r.value' END AS "reason",
+         "l"."__magi_a_region" AS "l_region",
+         "l"."__magi_a_value" AS "l_value",
+         "r"."region" AS "r_region",
+         "r"."value" AS "r_value"
+  FROM "__magi_step_2" AS "l"
+  JOIN "__magi_rc_pair_b" AS "r" ON "l"."b_id" = "r"."__magi_id"
+),
+"__magi_step_4" AS (
+  SELECT *
+  FROM "__magi_step_3"
+  ORDER BY "tier_index" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_4"
+ORDER BY "tier_index" ASC NULLS LAST;
+
+CREATE OR REPLACE TEMP TABLE "pair.unmatched_a" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_a" AS "l"
+  ANTI JOIN "__magi_rc_pair_links" AS "r" ON "l"."__magi_id" = "r"."a_id"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_held_a"
+  WHERE "status" = 'ambiguous'
+),
+"__magi_step_3" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  ANTI JOIN "__magi_step_2" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_4" AS (
+  SELECT "id", min("dup_of") AS "dup_of"
+  FROM "__magi_rc_pair_dups_a"
+  GROUP BY 1
+),
+"__magi_step_5" AS (
+  SELECT "l"."__magi_id",
+         "l"."ref",
+         "l"."region",
+         "l"."value",
+         "r"."dup_of" AS "__magi_dup_of"
+  FROM "__magi_step_3" AS "l"
+  LEFT JOIN "__magi_step_4" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_6" AS (
+  SELECT CASE WHEN "l"."__magi_dup_of" IS NOT NULL THEN 'duplicate' ELSE 'unmatched' END AS "match_status",
+         CASE WHEN "l"."__magi_dup_of" IS NOT NULL THEN concat_ws('|', CAST("r"."ref" AS VARCHAR)) END AS "duplicate_of",
+         "l"."ref",
+         "l"."region",
+         "l"."value"
+  FROM "__magi_step_5" AS "l"
+  LEFT JOIN "__magi_rc_pair_a" AS "r" ON "l"."__magi_dup_of" = "r"."__magi_id"
+),
+"__magi_step_7" AS (
+  SELECT *
+  FROM "__magi_step_6"
+  ORDER BY "ref" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_7"
+ORDER BY "ref" ASC NULLS LAST;
+
+CREATE OR REPLACE TEMP TABLE "pair.unmatched_b" AS
+WITH "__magi_step_1" AS (
+  SELECT "l".*
+  FROM "__magi_rc_pair_b" AS "l"
+  ANTI JOIN "__magi_rc_pair_links" AS "r" ON "l"."__magi_id" = "r"."b_id"
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_rc_pair_held_b"
+  WHERE "status" = 'ambiguous'
+),
+"__magi_step_3" AS (
+  SELECT "l".*
+  FROM "__magi_step_1" AS "l"
+  ANTI JOIN "__magi_step_2" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_4" AS (
+  SELECT "id", min("dup_of") AS "dup_of"
+  FROM "__magi_rc_pair_dups_b"
+  GROUP BY 1
+),
+"__magi_step_5" AS (
+  SELECT "l"."__magi_id",
+         "l"."ref",
+         "l"."region",
+         "l"."value",
+         "r"."dup_of" AS "__magi_dup_of"
+  FROM "__magi_step_3" AS "l"
+  LEFT JOIN "__magi_step_4" AS "r" ON "l"."__magi_id" = "r"."id"
+),
+"__magi_step_6" AS (
+  SELECT CASE WHEN "l"."__magi_dup_of" IS NOT NULL THEN 'duplicate' ELSE 'unmatched' END AS "match_status",
+         CASE WHEN "l"."__magi_dup_of" IS NOT NULL THEN concat_ws('|', CAST("r"."ref" AS VARCHAR)) END AS "duplicate_of",
+         "l"."ref",
+         "l"."region",
+         "l"."value"
+  FROM "__magi_step_5" AS "l"
+  LEFT JOIN "__magi_rc_pair_b" AS "r" ON "l"."__magi_dup_of" = "r"."__magi_id"
+),
+"__magi_step_7" AS (
+  SELECT *
+  FROM "__magi_step_6"
+  ORDER BY "ref" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_7"
+ORDER BY "ref" ASC NULLS LAST;
+
+CREATE OR REPLACE TEMP TABLE "pair.candidates" AS
+WITH "__magi_step_1" AS (
+  SELECT "a_id", "b_id", "tier_index", min("kind") AS "kind"
+  FROM "__magi_rc_pair_links"
+  GROUP BY 1, 2, 3
+),
+"__magi_step_2" AS (
+  SELECT "l"."a_id",
+         "l"."b_id",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."candidate_rank",
+         "l"."rank_values",
+         coalesce("r"."kind", 'not selected') AS "outcome"
+  FROM "__magi_rc_pair_cands" AS "l"
+  LEFT JOIN "__magi_step_1" AS "r" ON "l"."a_id" = "r"."a_id" AND "l"."b_id" = "r"."b_id" AND "l"."tier_index" = "r"."tier_index"
+),
+"__magi_step_3" AS (
+  SELECT "l"."a_id",
+         "l"."b_id",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."candidate_rank",
+         "l"."rank_values",
+         "l"."outcome",
+         "r"."__magi_id" AS "__magi_a___magi_id",
+         "r"."ref" AS "__magi_a_ref",
+         "r"."region" AS "__magi_a_region",
+         "r"."value" AS "__magi_a_value"
+  FROM "__magi_step_2" AS "l"
+  JOIN "__magi_rc_pair_a" AS "r" ON "l"."a_id" = "r"."__magi_id"
+),
+"__magi_step_4" AS (
+  SELECT CASE WHEN "l"."tier_index" = 1 THEN 'exact' END AS "tier",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."__magi_a_ref" AS "l_ref",
+         "r"."ref" AS "r_ref",
+         CASE WHEN "l"."outcome" = 'match' THEN 'matched' ELSE "l"."outcome" END AS "outcome",
+         "l"."candidate_rank",
+         "l"."rank_values"
+  FROM "__magi_step_3" AS "l"
+  JOIN "__magi_rc_pair_b" AS "r" ON "l"."b_id" = "r"."__magi_id"
+),
+"__magi_step_5" AS (
+  SELECT *
+  FROM "__magi_step_4"
+  ORDER BY "tier_index" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_5"
+ORDER BY "tier_index" ASC NULLS LAST;
+
+CREATE OR REPLACE TEMP TABLE "pair.ambiguous" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'ambiguous'
+),
+"__magi_step_2" AS (
+  SELECT "l"."a_id",
+         "l"."b_id",
+         "l"."tier_index",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."kind",
+         "l"."amb_group",
+         "l"."cand_a",
+         "l"."cand_b",
+         "l"."candidate_rank",
+         "l"."rank_values",
+         "r"."__magi_id" AS "__magi_a___magi_id",
+         "r"."ref" AS "__magi_a_ref",
+         "r"."region" AS "__magi_a_region",
+         "r"."value" AS "__magi_a_value"
+  FROM "__magi_step_1" AS "l"
+  JOIN "__magi_rc_pair_a" AS "r" ON "l"."a_id" = "r"."__magi_id"
+),
+"__magi_step_3" AS (
+  SELECT CASE WHEN "l"."tier_index" = 1 THEN 'exact' END AS "tier",
+         "l"."tier_index",
+         dense_rank() OVER (ORDER BY "l"."tier_index" ASC NULLS LAST, "l"."amb_group" ASC NULLS LAST) AS "ambiguity_id",
+         "l"."a_group",
+         "l"."b_group",
+         "l"."__magi_a_ref" AS "l_ref",
+         "r"."ref" AS "r_ref",
+         "l"."__magi_a_region" AS "l_region",
+         "l"."__magi_a_value" AS "l_value",
+         "r"."region" AS "r_region",
+         "r"."value" AS "r_value"
+  FROM "__magi_step_2" AS "l"
+  JOIN "__magi_rc_pair_b" AS "r" ON "l"."b_id" = "r"."__magi_id"
+),
+"__magi_step_4" AS (
+  SELECT *
+  FROM "__magi_step_3"
+  ORDER BY "tier_index" ASC NULLS LAST, "ambiguity_id" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_4"
+ORDER BY "tier_index" ASC NULLS LAST, "ambiguity_id" ASC NULLS LAST;
+
+CREATE OR REPLACE TEMP TABLE "pair.summary" AS
+WITH "__magi_step_1" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match' AND "tier_index" = 1
+),
+"__magi_step_2" AS (
+  SELECT count(*) AS "pairs", count(DISTINCT "a_id") AS "a_rows", count(DISTINCT "b_id") AS "b_rows"
+  FROM "__magi_step_1"
+),
+"__magi_step_3" AS (
+  SELECT 1 AS "position",
+         'exact' AS "step",
+         1 AS "tier_index",
+         "pairs",
+         "a_rows",
+         "b_rows"
+  FROM "__magi_step_2"
+),
+"__magi_step_4" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'ambiguous'
+),
+"__magi_step_5" AS (
+  SELECT "a_id", "b_id"
+  FROM "__magi_step_4"
+),
+"__magi_step_6" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_5"
+),
+"__magi_step_7" AS (
+  SELECT count(*) AS "pairs"
+  FROM "__magi_step_6"
+),
+"__magi_step_8" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'ambiguous'
+),
+"__magi_step_9" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_10" AS (
+  SELECT "l".*
+  FROM "__magi_step_8" AS "l"
+  ANTI JOIN "__magi_step_9" AS "r" ON "l"."a_id" = "r"."a_id"
+),
+"__magi_step_11" AS (
+  SELECT "a_id" AS "id"
+  FROM "__magi_step_10"
+),
+"__magi_step_12" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_11"
+),
+"__magi_step_13" AS (
+  SELECT count(*) AS "a_rows"
+  FROM "__magi_step_12"
+),
+"__magi_step_14" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'ambiguous'
+),
+"__magi_step_15" AS (
+  SELECT *
+  FROM "__magi_rc_pair_links"
+  WHERE "kind" = 'match'
+),
+"__magi_step_16" AS (
+  SELECT "l".*
+  FROM "__magi_step_14" AS "l"
+  ANTI JOIN "__magi_step_15" AS "r" ON "l"."b_id" = "r"."b_id"
+),
+"__magi_step_17" AS (
+  SELECT "b_id" AS "id"
+  FROM "__magi_step_16"
+),
+"__magi_step_18" AS (
+  SELECT DISTINCT *
+  FROM "__magi_step_17"
+),
+"__magi_step_19" AS (
+  SELECT count(*) AS "b_rows"
+  FROM "__magi_step_18"
+),
+"__magi_step_20" AS (
+  SELECT "l"."a_rows", "r"."b_rows"
+  FROM "__magi_step_13" AS "l"
+  JOIN "__magi_step_19" AS "r" ON TRUE
+),
+"__magi_step_21" AS (
+  SELECT "l"."pairs", "r"."a_rows", "r"."b_rows"
+  FROM "__magi_step_7" AS "l"
+  JOIN "__magi_step_20" AS "r" ON TRUE
+),
+"__magi_step_22" AS (
+  SELECT 2 AS "position",
+         'ambiguous' AS "step",
+         NULL AS "tier_index",
+         "pairs",
+         "a_rows",
+         "b_rows"
+  FROM "__magi_step_21"
+),
+"__magi_step_23" AS (
+  SELECT *
+  FROM "pair.unmatched_a"
+  WHERE "match_status" = 'duplicate'
+),
+"__magi_step_24" AS (
+  SELECT count(*) AS "a_rows"
+  FROM "__magi_step_23"
+),
+"__magi_step_25" AS (
+  SELECT *
+  FROM "pair.unmatched_b"
+  WHERE "match_status" = 'duplicate'
+),
+"__magi_step_26" AS (
+  SELECT count(*) AS "b_rows"
+  FROM "__magi_step_25"
+),
+"__magi_step_27" AS (
+  SELECT 0 AS "pairs", "l"."a_rows", "r"."b_rows"
+  FROM "__magi_step_24" AS "l"
+  JOIN "__magi_step_26" AS "r" ON TRUE
+),
+"__magi_step_28" AS (
+  SELECT 3 AS "position",
+         'duplicate' AS "step",
+         NULL AS "tier_index",
+         "pairs",
+         "a_rows",
+         "b_rows"
+  FROM "__magi_step_27"
+),
+"__magi_step_29" AS (
+  SELECT *
+  FROM "pair.unmatched_a"
+  WHERE "match_status" = 'unmatched'
+),
+"__magi_step_30" AS (
+  SELECT count(*) AS "a_rows"
+  FROM "__magi_step_29"
+),
+"__magi_step_31" AS (
+  SELECT *
+  FROM "pair.unmatched_b"
+  WHERE "match_status" = 'unmatched'
+),
+"__magi_step_32" AS (
+  SELECT count(*) AS "b_rows"
+  FROM "__magi_step_31"
+),
+"__magi_step_33" AS (
+  SELECT 0 AS "pairs", "l"."a_rows", "r"."b_rows"
+  FROM "__magi_step_30" AS "l"
+  JOIN "__magi_step_32" AS "r" ON TRUE
+),
+"__magi_step_34" AS (
+  SELECT 4 AS "position",
+         'unmatched' AS "step",
+         NULL AS "tier_index",
+         "pairs",
+         "a_rows",
+         "b_rows"
+  FROM "__magi_step_33"
+),
+"__magi_step_35" AS (
+  SELECT count(*) AS "a_rows"
+  FROM "__magi_rc_pair_a"
+),
+"__magi_step_36" AS (
+  SELECT count(*) AS "b_rows"
+  FROM "__magi_rc_pair_b"
+),
+"__magi_step_37" AS (
+  SELECT 0 AS "pairs", "l"."a_rows", "r"."b_rows"
+  FROM "__magi_step_35" AS "l"
+  JOIN "__magi_step_36" AS "r" ON TRUE
+),
+"__magi_step_38" AS (
+  SELECT 5 AS "position",
+         'total' AS "step",
+         NULL AS "tier_index",
+         "pairs",
+         "a_rows",
+         "b_rows"
+  FROM "__magi_step_37"
+)
+SELECT *
+FROM "__magi_step_3"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_22"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_28"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_34"
+UNION ALL BY NAME
+SELECT *
+FROM "__magi_step_38";

@@ -1,0 +1,7 @@
+source n = csv("nulls.csv") { schema { id: int amount: int? } }
+validate n {
+    expect sum(amount) > 0
+    warn mean(amount) > 100
+    expect count() == 2
+}
+export n.checks to "checks.csv"

@@ -1,0 +1,3 @@
+source s = csv("s.csv")
+dataset d = s |> rename x -> V
+export d to "out/d.csv"

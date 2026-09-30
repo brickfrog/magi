@@ -1,0 +1,4 @@
+source a = csv("a.csv")
+source c = csv("c.csv")
+dataset d = a |> derive { z = 1 } |> join c on c.k == a.k
+export d to "out/d.csv"

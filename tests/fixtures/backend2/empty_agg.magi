@@ -1,0 +1,4 @@
+source a = csv("a.csv")
+dataset big = a |> filter amount > 100
+validate big { require sum(amount) > 0 }
+export big to "big.csv"

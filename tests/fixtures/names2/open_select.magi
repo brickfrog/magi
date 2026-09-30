@@ -1,0 +1,3 @@
+dataset q = native_sql { dialect: duckdb  query: """SELECT 'cd' AS v, 1 AS w"""  inputs: [] }
+dataset e = q |> filter w > 0 |> select v |> derive { n = length(v) }
+export e to "out/e.csv"

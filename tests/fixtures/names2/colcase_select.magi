@@ -1,0 +1,3 @@
+source s = csv("s.csv")
+dataset d = s |> select x, X = x + 1
+export d to "out/d.csv"

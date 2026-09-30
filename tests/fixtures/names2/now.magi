@@ -1,0 +1,3 @@
+source n = csv("n.csv")
+dataset d = n |> derive { t = duckdb.now(), c = duckdb.current_date(), u = duckdb.upper(code) }
+export d to "out/d.csv"

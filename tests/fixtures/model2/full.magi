@@ -1,0 +1,13 @@
+source sales_raw = csv("sales.csv")
+source customers_raw = csv("customers.csv")
+
+dataset sales = sales_raw
+dataset customers = customers_raw
+
+export sales to "out/sales.parquet"
+export customers to "out/customers.parquet"
+
+model shop {
+    relationship sales.customer_id -> customers.customer_id
+    metric revenue { value: sum(sales.amount) }
+}

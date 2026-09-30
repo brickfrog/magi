@@ -1,0 +1,3 @@
+# Long numeric identifiers and codes with leading zeros are inferred as text.
+source s = csv("ids.csv")
+export s to "out/ids.csv"

@@ -1,0 +1,16 @@
+source lines = csv("lines.csv") {
+    all_text: true
+    identity id
+}
+
+dataset typed = lines |> select { id, amount = parse_number(amount) }
+
+dataset totals = typed |> aggregate { total = sum(amount) }
+
+# every line with the one-row totals: an explicit cross join
+dataset shares = typed
+    |> join totals on true
+    |> select { id, amount, total }
+    |> sort id
+
+export shares to "out/shares.csv"

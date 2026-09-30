@@ -1,0 +1,4 @@
+source orders_2021 = csv("a.csv")
+source orders_2022 = csv("a.csv")
+dataset d = orders_2023
+export d to "o.csv"

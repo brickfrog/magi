@@ -1,0 +1,2 @@
+source s = csv("dates.csv") { schema { dmy: date("%d/%m/%Y") } }
+export s to "out/dates.csv"

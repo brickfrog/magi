@@ -1,0 +1,24 @@
+# User columns named `unit`, `cls` and `exact` are the user's, in blocking, requires and
+# group keys.
+source a = csv("names_a.csv") { identity id }
+source b = csv("names_b.csv") { identity id }
+source lines = csv("lines_a.csv") { identity id }
+source totals = csv("lines_b.csv") { identity id }
+
+reconcile r = a with b {
+    block by unit
+    tier t { require a.cls == b.cls and a.exact == b.exact and a.amt == b.amt }
+}
+
+reconcile g = lines as a with totals as b {
+    tier roll {
+        many a to one b
+        group a by unit
+        block by unit
+        require sum(a.amt) == b.amt
+    }
+}
+
+export r.matches to "out/names_matches.csv"
+export r.unmatched_b to "out/names_unmatched_b.csv"
+export g.matches to "out/groups_matches.csv"

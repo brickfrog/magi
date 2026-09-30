@@ -1,0 +1,3 @@
+source n = csv("n.csv")
+dataset d = n |> derive { r = duckdb.read_csv("n.csv") }
+export d to "out/d.csv"

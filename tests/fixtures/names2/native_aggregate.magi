@@ -1,0 +1,3 @@
+source n = csv("n.csv")
+dataset d = n |> derive { s = duckdb.sum(amount) }
+export d to "out/d.csv"

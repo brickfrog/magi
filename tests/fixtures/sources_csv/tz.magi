@@ -1,0 +1,2 @@
+source s = csv("tz.csv") { schema { id: int  t: time("%H.%M")  ts: timestamp_tz("%d/%m/%Y %H:%M %z") } }
+export s to "out/tz.csv"

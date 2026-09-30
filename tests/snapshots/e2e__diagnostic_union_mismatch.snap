@@ -1,0 +1,16 @@
+---
+source: tests/e2e.rs
+expression: "check_stderr(\"errors\", \"union_mismatch.magi\")"
+---
+error[M119]
+
+  × `union` inputs have different columns (missing on the right: amount; only on the right: total)
+    ╭─[union_mismatch.magi:10:27]
+  9 │ 
+ 10 │ dataset both = a |> union b
+    ·                           ┬
+    ·                           ╰── union matches columns by name
+ 11 │ export both to "out/both.csv"
+    ╰────
+  help: select/rename so both sides have the same column names
+1 error(s), 0 warning(s)

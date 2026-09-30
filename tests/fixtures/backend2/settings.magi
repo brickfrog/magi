@@ -1,0 +1,6 @@
+runtime {
+    threads: 2
+    memory_limit: "1GB"
+}
+source a = csv("a.csv")
+export a to "out.csv"

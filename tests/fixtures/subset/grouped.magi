@@ -1,0 +1,11 @@
+source bank = csv("dep_bank.csv") { identity id }
+source gl = csv("dep_gl.csv") { identity id }
+
+reconcile r = bank as a with gl as b {
+    block by none
+    tier t {
+        group b by entry
+        subset b max_items 2
+        require sum(b.amount) == a.amount
+    }
+}

@@ -1,0 +1,14 @@
+# `s` has no declared schema and is not contacted without --sources.
+
+connection w = odbc { dsn: "magi_cli_test_no_such_dsn" }
+
+source s = sql(w) { query: "SELECT x FROM t" }
+source t = csv("t.csv")
+source typed = csv("t.csv") { schema { id: int } }
+
+dataset d = s |> derive { y = x + 1 }
+dataset k = t |> derive { z = id + 1 }
+
+export d to "out/d.csv"
+export k to "out/k.csv"
+export typed to "out/typed.csv"

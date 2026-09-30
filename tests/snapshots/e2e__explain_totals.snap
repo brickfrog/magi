@@ -1,0 +1,9 @@
+---
+source: tests/e2e.rs
+expression: fx.normalize(&out.stdout)
+---
+dataset totals (reads priced)
+
+Sort [total desc, region asc, orders asc]
+  Aggregate by [region] compute [orders = count(), total = sum(amount)]
+    Scan priced

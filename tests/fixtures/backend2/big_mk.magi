@@ -1,0 +1,2 @@
+dataset u = native_sql { dialect: duckdb  query: """SELECT 1 AS id, 18446744073709551615::UBIGINT AS big, 12345678901234567890.12::DECIMAL(38,2) AS d, 1.25::DECIMAL(38,2) AS small"""  inputs: [] }
+export u to "u.xlsx"

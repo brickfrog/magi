@@ -1,0 +1,4 @@
+source a = csv("a.csv")
+source b = csv("b.csv")
+dataset d = a |> join b on b.k == a.k
+export d to "out/d.csv"

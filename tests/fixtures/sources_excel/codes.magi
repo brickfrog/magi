@@ -1,0 +1,3 @@
+# Numbers stored as text keep their exact text; long numeric IDs stay distinct.
+source s = excel("cells.xlsx") { sheet: "Codes"  schema { code: string } }
+export s to "out/codes.csv"

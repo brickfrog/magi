@@ -1,0 +1,4 @@
+import "lib.magi"
+dataset m = a
+dataset n = d
+export m to "o.csv"

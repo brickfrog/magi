@@ -1,0 +1,80 @@
+# On a side that is not consumed, a row an earlier tier matched stays available; it is never a
+# surplus copy. B1 and B2 are exact duplicates. Step 1 matches by reference, step 2 by amount
+# (both B rows are equally good), step 3 by reference again.
+#   hi: step 1 matches B2; step 2 must not withhold B2 as a duplicate, so step 3 can match it.
+#   lo: step 1 matches B1; step 2 prefers the unmatched B2 over B1, so nothing is surplus.
+source rm_a = csv("rematch_a.csv") { identity id }
+source rm_b = csv("rematch_b.csv") { identity id }
+
+dataset hi = rm_a |> filter case == "hi"
+dataset lo = rm_a |> filter case == "lo"
+
+reconcile m2o_a_hi = hi as a with rm_b as b {
+    cardinality many_to_one
+    consume a
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+reconcile m2o_a_lo = lo as a with rm_b as b {
+    cardinality many_to_one
+    consume a
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+reconcile m2o_none_hi = hi as a with rm_b as b {
+    cardinality many_to_one
+    consume none
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+reconcile o2o_a_hi = hi as a with rm_b as b {
+    consume a
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+reconcile o2o_a_lo = lo as a with rm_b as b {
+    consume a
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+reconcile o2o_none_hi = hi as a with rm_b as b {
+    consume none
+    block by none
+    tier ref { require a.step == 1 and a.ref == b.id }
+    tier amount { require a.step == 2 and a.amount == b.amount }
+    tier ref_again { require a.step == 3 and a.ref == b.id }
+}
+
+export m2o_a_hi.matches to "out/m2o_a_hi_matches.csv"
+export m2o_a_hi.unmatched_a to "out/m2o_a_hi_unmatched_a.csv"
+export m2o_a_hi.unmatched_b to "out/m2o_a_hi_unmatched_b.csv"
+export m2o_a_lo.matches to "out/m2o_a_lo_matches.csv"
+export m2o_a_lo.unmatched_a to "out/m2o_a_lo_unmatched_a.csv"
+export m2o_a_lo.unmatched_b to "out/m2o_a_lo_unmatched_b.csv"
+export m2o_none_hi.matches to "out/m2o_none_hi_matches.csv"
+export m2o_none_hi.unmatched_a to "out/m2o_none_hi_unmatched_a.csv"
+export m2o_none_hi.unmatched_b to "out/m2o_none_hi_unmatched_b.csv"
+export o2o_a_hi.matches to "out/o2o_a_hi_matches.csv"
+export o2o_a_hi.unmatched_a to "out/o2o_a_hi_unmatched_a.csv"
+export o2o_a_hi.unmatched_b to "out/o2o_a_hi_unmatched_b.csv"
+export o2o_a_lo.matches to "out/o2o_a_lo_matches.csv"
+export o2o_a_lo.unmatched_a to "out/o2o_a_lo_unmatched_a.csv"
+export o2o_a_lo.unmatched_b to "out/o2o_a_lo_unmatched_b.csv"
+export o2o_none_hi.matches to "out/o2o_none_hi_matches.csv"
+export o2o_none_hi.unmatched_a to "out/o2o_none_hi_unmatched_a.csv"
+export o2o_none_hi.unmatched_b to "out/o2o_none_hi_unmatched_b.csv"

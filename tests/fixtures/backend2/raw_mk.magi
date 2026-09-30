@@ -1,0 +1,2 @@
+source seed = csv("m.csv")
+export to "x.duckdb" { table "t" = seed }

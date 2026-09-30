@@ -1,0 +1,36 @@
+# clash: a1 = b1 + b2 and a2 = b1 + b3 are each unique, but share b1: both are ambiguous.
+# apart: a1 = b1 + b2; a3's best subset is b4 (one row), its runner-up b2 + b3 shares b2 with
+# a1's best subset, which is no conflict.
+source clash_a = csv("clash_a.csv") { identity id }
+source clash_b = csv("clash_b.csv") { identity id }
+source apart_a = csv("apart_a.csv") { identity id }
+source apart_b = csv("apart_b.csv") { identity id }
+
+reconcile clash = clash_a as a with clash_b as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) == a.amount
+    }
+}
+
+reconcile apart = apart_a as a with apart_b as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) == a.amount
+        rank by count(b.id)
+    }
+}
+
+export clash.matches to "out/clash_matches.csv"
+export clash.ambiguous to "out/clash_ambiguous.csv"
+export clash.unmatched_a to "out/clash_unmatched_a.csv"
+export clash.unmatched_b to "out/clash_unmatched_b.csv"
+export clash.summary to "out/clash_summary.csv"
+export apart.matches to "out/apart_matches.csv"
+export apart.ambiguous to "out/apart_ambiguous.csv"
+export apart.unmatched_a to "out/apart_unmatched_a.csv"
+export apart.unmatched_b to "out/apart_unmatched_b.csv"
+export apart.summary to "out/apart_summary.csv"
+export apart.candidates to "out/apart_candidates.csv"

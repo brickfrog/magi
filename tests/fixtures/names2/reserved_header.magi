@@ -1,0 +1,2 @@
+source a = csv("internal.csv")
+export a to "out/a.csv"

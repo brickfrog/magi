@@ -1,0 +1,8 @@
+source ta = csv("tie_a.csv") { identity id }
+source tb = csv("tie_b.csv") { identity id }
+
+reconcile r = ta as a with tb as b {
+    block by none
+    tier one { subset b max_items 1  require sum(b.amount) == a.amount }
+    tier most { subset b max_items 16  require sum(b.amount) == a.amount }
+}

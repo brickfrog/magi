@@ -1,0 +1,42 @@
+# Rollups: several A rows reported as one B row (or several).
+#   O1: a1 + a2 + a3 = b1                                  -> many a to one b
+#   O2: a4 = b2, a group of one row                        -> matched
+#   O3: a5 + a6 = b3, but the whole group (a5..a7) is not  -> unmatched (no subset search)
+#   O4: a8 + a9 = b4 + b5                                  -> many a to many b
+#   a10 is on another day: its own group of one            -> unmatched
+
+source a = csv("a.csv") {
+    identity id
+    schema { id: string, org: string, day: date, kg: decimal(10,2) }
+}
+
+source b = csv("b.csv") {
+    identity id
+    schema { id: string, org: string, day: date, kg: decimal(10,2) }
+}
+
+reconcile r = a with b {
+    tier rollup {
+        many a to one b
+        group a by org, day
+        block by org, day
+        require sum(a.kg) == b.kg
+        evidence { a_total = sum(a.kg) }
+    }
+    tier rollup_many {
+        many a to many b
+        group a by org, day
+        group b by org, day
+        block by org, day
+        require sum(a.kg) == sum(b.kg)
+        evidence {
+            a_total = sum(a.kg)
+            b_total = sum(b.kg)
+        }
+    }
+}
+
+export r.matches to "out/matches.csv"
+export r.unmatched_a to "out/unmatched_a.csv"
+export r.unmatched_b to "out/unmatched_b.csv"
+export r.summary to "out/summary.csv"

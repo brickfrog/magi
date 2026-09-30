@@ -1,0 +1,7 @@
+# No `block` clause in the tier nor for the reconciliation: every pair is compared by default.
+source bank = csv("bank.csv") { identity id }
+source gl = csv("gl.csv") { identity [ref, entry] }
+
+reconcile r = bank as a with gl as b {
+    tier exact { require a.amount == b.amount }
+}

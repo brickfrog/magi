@@ -1,0 +1,20 @@
+source a = csv("lines.csv") {
+    all_text: true
+    identity id
+}
+
+source b = csv("lines.csv") {
+    all_text: true
+    identity id
+}
+
+reconcile r = a as a with b as b {
+    identity a: id
+    identity b: id
+
+    tier same {
+        block by id
+    }
+}
+
+export r.matches to "out/matches.csv"

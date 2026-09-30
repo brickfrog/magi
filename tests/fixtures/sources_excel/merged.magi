@@ -1,0 +1,2 @@
+source m = excel("cells.xlsx") { sheet: "Merged" }
+export m to "out/merged.csv"

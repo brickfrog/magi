@@ -1,0 +1,2 @@
+source c = csv("skipped.csv") { schema { id: int  amount: decimal(18,2) } }
+export c to "out/skipped.csv"

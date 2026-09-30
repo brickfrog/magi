@@ -1,0 +1,16 @@
+---
+source: tests/e2e.rs
+expression: "check_stderr(\"errors\", \"unknown_column.magi\")"
+---
+error[M012]
+
+  × column `amont` does not exist
+    ╭─[unknown_column.magi:10:27]
+  9 │ 
+ 10 │ dataset big = a |> filter amont > 5
+    ·                           ──┬──
+    ·                             ╰── unknown column
+ 11 │ export big to "out/big.csv"
+    ╰────
+  help: did you mean `amount`?
+1 error(s), 0 warning(s)

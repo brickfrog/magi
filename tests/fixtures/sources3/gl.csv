@@ -1,0 +1,7 @@
+Account,Batch,Line,Amount
+,7,L0,1
+1010 Cash,,L1,10
+,,L2,20
+  ,8,L3,30
+1020 Savings,,L4,40
+,,L5,50

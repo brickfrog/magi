@@ -1,0 +1,7 @@
+# `block by none` and no `require`: the tier accepts any pair.
+source bank = csv("bank.csv") { identity id }
+source gl = csv("gl.csv") { identity [ref, entry] }
+
+reconcile r = bank as a with gl as b {
+    tier anything { block by none }
+}

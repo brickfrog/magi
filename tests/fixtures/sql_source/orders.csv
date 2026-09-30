@@ -1,0 +1,4 @@
+id,customer,amount,day
+1,acme,10.50,2024-01-05
+2,globex,20.00,2024-01-06
+3,acme,5.25,2024-02-01

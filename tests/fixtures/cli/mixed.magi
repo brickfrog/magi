@@ -1,0 +1,15 @@
+# The source passes `sheet` as an argument instead of in an option
+# block, and the SQL source names a connection that is never declared.
+
+source cases = excel("cases.xlsx", sheet: "FY26")
+
+source offices = sql("warehouse") {
+    query: """
+        SELECT office_id, state, region
+        FROM dim_office
+    """
+}
+
+dataset cases_with_region = cases
+    |> join offices on office_id
+    |> derive age_days = days_between(event_date, today())

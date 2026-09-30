@@ -1,0 +1,24 @@
+# Two relationships between the same tables: only the first one is active in Power BI.
+
+source sales_raw = csv("sales.csv") {
+    schema {
+        sale_id: int
+        customer_id: int
+        amount: decimal(12, 2)
+        qty: int
+    }
+}
+
+source customers_raw = csv("customers.csv")
+
+dataset sales = sales_raw |> derive { bill_to = customer_id }
+dataset customers = customers_raw
+
+export sales to "out/sales.parquet"
+export customers to "out/customers.parquet"
+
+model billing {
+    relationship sales.customer_id -> customers.customer_id
+    relationship sales.bill_to -> customers.customer_id
+    dimension customer_key = customers.customer_id
+}

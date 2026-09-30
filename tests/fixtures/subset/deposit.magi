@@ -1,0 +1,21 @@
+# A GL deposit entry (its lines grouped by `entry`) is up to 2 bank lines dated 0 to 5 days
+# after it: E1 = d1 (mis-keyed) + d2 (its correction), E2 = d3.
+source bank = csv("dep_bank.csv") { identity id }
+source gl = csv("dep_gl.csv") { identity id }
+
+reconcile dep = bank as a with gl as b {
+    block by none
+    tier deposits {
+        many a to many b
+        group b by entry
+        subset a max_items 2
+        require date_diff(min(b.date), a.date) >= 0 and date_diff(min(b.date), a.date) <= 5
+        require sum(a.amount) == sum(b.amount)
+    }
+}
+
+export dep.matches to "out/dep_matches.csv"
+export dep.ambiguous to "out/dep_ambiguous.csv"
+export dep.unmatched_a to "out/dep_unmatched_a.csv"
+export dep.unmatched_b to "out/dep_unmatched_b.csv"
+export dep.summary to "out/dep_summary.csv"

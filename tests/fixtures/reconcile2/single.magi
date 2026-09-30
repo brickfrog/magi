@@ -1,0 +1,12 @@
+# A defined group of one row is still a group; a row with a null group key is in no group.
+source a = csv("single_a.csv") { identity id }
+source b = csv("single_b.csv") { identity id }
+
+reconcile r = a with b {
+    block by org
+    tier roll { many a to one b  group a by org, g  require sum(a.amt) == b.amt }
+}
+
+export r.matches to "out/single_matches.csv"
+export r.unmatched_a to "out/single_unmatched_a.csv"
+export r.unmatched_b to "out/single_unmatched_b.csv"

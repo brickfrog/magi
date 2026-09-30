@@ -1,0 +1,4 @@
+source a = csv("a.csv")
+export a to "out/first.csv"
+export a to "out/blocker.csv"
+export a to "out/zlast.csv"

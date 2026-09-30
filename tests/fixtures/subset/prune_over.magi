@@ -1,0 +1,13 @@
+# the same with a budget of 4: the 5 subsets of one row already exceed it
+source pa = csv("prune_a.csv") { identity id }
+source pb = csv("budget_b.csv") { identity id }
+
+reconcile prune = pa as a with pb as b {
+    block by none
+    tier sums {
+        subset b max_items 2 max_subsets 4
+        require sum(b.amount) == a.amount
+    }
+}
+
+export prune.matches to "out/prune_matches.csv"

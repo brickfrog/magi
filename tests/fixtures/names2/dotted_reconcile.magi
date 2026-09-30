@@ -1,0 +1,5 @@
+source a = csv("v.csv") { identity id }
+source b = csv("v.csv") { identity id }
+reconcile r = a with b { block by org  tier t { require a.amt == b.amt } }
+dataset `r.matches` = a |> filter id > 100
+export `r.matches` to "out/z.csv"

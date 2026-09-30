@@ -1,0 +1,139 @@
+# Stars in one_to_one selection: a class whose best candidates are tied across several classes
+# of the other side, each of which has it as its unique best candidate. GL receipts are separate
+# classes because the policy looks at `cust` and `entry`; bank lines of one scenario and amount
+# are one class. One reconciliation per scenario, centred on the bank side:
+#   eq:          2 identical bank lines vs 2 receipts from different customers -> both matched
+#   twice:       1 bank line vs 1 receipt posted twice (differs only in `entry`) -> 1 match + 1 duplicate
+#   generic:     1 bank line vs 2 receipts from different customers -> ambiguous
+#   three:       3 bank lines differing only in `memo` (not looked at) vs 2 receipts -> ambiguous
+#   three_exact: 3 identical bank lines vs 2 receipts -> 2 matches + 1 duplicate
+#   shared_leaf: R10 is as good for a63 as for {a61, a62}, so it is no leaf of a star -> ambiguous
+source bank = csv("bank.csv")
+source gl = csv("gl.csv")
+
+dataset eq_bank = bank |> filter scenario == "eq"
+dataset eq_gl = gl |> filter scenario == "eq"
+dataset twice_bank = bank |> filter scenario == "twice"
+dataset twice_gl = gl |> filter scenario == "twice"
+dataset generic_bank = bank |> filter scenario == "generic"
+dataset generic_gl = gl |> filter scenario == "generic"
+dataset three_bank = bank |> filter scenario == "three"
+dataset three_gl = gl |> filter scenario == "three"
+dataset three_exact_bank = bank |> filter scenario == "three_exact"
+dataset three_exact_gl = gl |> filter scenario == "three_exact"
+dataset shared_leaf_bank = bank |> filter scenario == "shared_leaf"
+dataset shared_leaf_gl = gl |> filter scenario == "shared_leaf"
+
+reconcile eq = eq_bank as a with eq_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+reconcile twice = twice_bank as a with twice_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+reconcile generic = generic_bank as a with generic_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+reconcile three = three_bank as a with three_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+reconcile three_exact = three_exact_bank as a with three_exact_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+reconcile shared_leaf = shared_leaf_bank as a with shared_leaf_gl as b {
+    identity a: id
+    identity b: [ref, entry]
+    tier amount {
+        block by none
+        require abs(a.amount - b.amount) <= 1
+        evidence {
+            customer = b.cust
+            posting = b.entry
+        }
+    }
+}
+
+export eq.matches to "out/eq_matches.csv"
+export eq.ambiguous to "out/eq_ambiguous.csv"
+export eq.unmatched_a to "out/eq_unmatched_a.csv"
+export eq.unmatched_b to "out/eq_unmatched_b.csv"
+export eq.summary to "out/eq_summary.csv"
+
+export twice.matches to "out/twice_matches.csv"
+export twice.ambiguous to "out/twice_ambiguous.csv"
+export twice.unmatched_a to "out/twice_unmatched_a.csv"
+export twice.unmatched_b to "out/twice_unmatched_b.csv"
+export twice.summary to "out/twice_summary.csv"
+
+export generic.matches to "out/generic_matches.csv"
+export generic.ambiguous to "out/generic_ambiguous.csv"
+export generic.unmatched_a to "out/generic_unmatched_a.csv"
+export generic.unmatched_b to "out/generic_unmatched_b.csv"
+export generic.summary to "out/generic_summary.csv"
+
+export three.matches to "out/three_matches.csv"
+export three.ambiguous to "out/three_ambiguous.csv"
+export three.unmatched_a to "out/three_unmatched_a.csv"
+export three.unmatched_b to "out/three_unmatched_b.csv"
+export three.summary to "out/three_summary.csv"
+
+export three_exact.matches to "out/three_exact_matches.csv"
+export three_exact.ambiguous to "out/three_exact_ambiguous.csv"
+export three_exact.unmatched_a to "out/three_exact_unmatched_a.csv"
+export three_exact.unmatched_b to "out/three_exact_unmatched_b.csv"
+export three_exact.summary to "out/three_exact_summary.csv"
+
+export shared_leaf.matches to "out/shared_leaf_matches.csv"
+export shared_leaf.ambiguous to "out/shared_leaf_ambiguous.csv"
+export shared_leaf.unmatched_a to "out/shared_leaf_unmatched_a.csv"
+export shared_leaf.unmatched_b to "out/shared_leaf_unmatched_b.csv"
+export shared_leaf.summary to "out/shared_leaf_summary.csv"

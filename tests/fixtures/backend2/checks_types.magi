@@ -1,0 +1,3 @@
+source a = csv("a.csv")
+validate a { expect amount not null  expect unique(id) }
+export a.checks to "checks.parquet"

@@ -1,0 +1,10 @@
+source items = csv("items.csv") { identity id }
+
+mapping categories {
+    "Firearm"          => "Firearms"
+    ["Gun", "Firearm"] => "Weapons"
+    otherwise          => original
+}
+
+dataset named = items |> normalize category with categories
+export named to "out/named.csv"

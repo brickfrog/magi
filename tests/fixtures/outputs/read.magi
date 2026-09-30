@@ -1,0 +1,11 @@
+# Reads back what write.magi exported, as sources.
+
+source from_parquet = parquet("out/totals.parquet")
+
+source from_xlsx = excel("out/report.xlsx") {
+    sheet: "Totals"
+    schema { region: string, orders: int, total: decimal(38,2)?, first_day: date }
+}
+
+export from_parquet to "back/from_parquet.csv"
+export from_xlsx to "back/from_xlsx.csv"

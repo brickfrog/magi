@@ -1,0 +1,8 @@
+source s = duckdb("x.duckdb") { query: """SELECT 'a
+b' AS v""" }
+dataset q = native_sql { dialect: duckdb  query: """SELECT 'c
+d' AS v"""  inputs: []  schema { v: string } }
+dataset d = s |> derive { n = length(v) }
+dataset e = q |> derive { n = length(v) }
+export d to "d.csv"
+export e to "e.csv"

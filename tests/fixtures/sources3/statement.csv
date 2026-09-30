@@ -1,0 +1,14 @@
+Demo Bank - Account Activity Export
+Account:,OPERATING ****1234
+Statement period:,07/01/2026 - 07/31/2026
+Opening balance:,"1,000.00"
+
+Posting Date,Description,Amount,Running Balance,Bank Reference
+07/01/2026,DEPOSIT,250.00,1250.00,R1
+07/02/2026,"CHECK 101
+VOID REISSUE",-50.00,1200.00,R2
+07/03/2026,FEE,-5.00,"1,195.00",R3
+
+Closing balance:,"1,195.00"
+Total credits:,1,250.00
+Total debits:,2,-55.00

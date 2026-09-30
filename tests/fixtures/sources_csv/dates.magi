@@ -1,0 +1,4 @@
+# `d` has a time in row 1; `dmy` is not ISO and is left undeclared.
+source s = csv("dates.csv") { schema { id: int  d: date? } }
+export s to "out/dates.csv"
+export s.rejects to "out/rejects.csv"

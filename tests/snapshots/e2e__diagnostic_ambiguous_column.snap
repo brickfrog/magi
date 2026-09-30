@@ -1,0 +1,16 @@
+---
+source: tests/e2e.rs
+expression: "check_stderr(\"errors\", \"ambiguous_column.magi\")"
+---
+error[M011]
+
+  × column `org` is ambiguous
+    ╭─[ambiguous_column.magi:12:19]
+ 11 │     |> join b on id
+ 12 │     |> select id, org
+    ·                   ─┬─
+    ·                    ╰── matches more than one column
+ 13 │ export joined to "out/joined.csv"
+    ╰────
+  help: qualify it: `a.org` or `b.org`
+1 error(s), 0 warning(s)

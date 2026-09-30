@@ -1,0 +1,3 @@
+source v = csv("v.csv") { schema { id: int org: string amt: int? } }
+dataset `v.rejects` = v |> filter id > 100
+export `v.rejects` to "out/vr.csv"

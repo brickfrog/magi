@@ -1,0 +1,30 @@
+# Power BI keeps one active filter path between two tables.
+
+source sales_raw = csv("sales.csv")
+source customers_raw = csv("customers.csv")
+source regions_raw = csv("regions.csv")
+
+dataset sales = sales_raw
+dataset returns = sales_raw
+dataset customers = customers_raw
+dataset regions = regions_raw
+
+export sales to "out/sales.parquet"
+export returns to "out/returns.parquet"
+export customers to "out/customers.parquet"
+export regions to "out/regions.parquet"
+
+# regions would filter sales directly and through customers
+model triangle {
+    relationship sales.customer_id -> customers.customer_id
+    relationship sales.region -> regions.region
+    relationship customers.region -> regions.region
+}
+
+# two fact tables sharing two dimensions: every filter path is unique
+model two_facts {
+    relationship sales.customer_id -> customers.customer_id
+    relationship sales.region -> regions.region
+    relationship returns.customer_id -> customers.customer_id
+    relationship returns.region -> regions.region
+}

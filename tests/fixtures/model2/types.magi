@@ -1,0 +1,32 @@
+# Power BI column types and measure formats.
+
+source sales_raw = csv("sales.csv") {
+    schema {
+        sale_id: int
+        customer_id: int
+        region: string
+        amount: decimal(12, 2)
+        large: bool
+        day: date
+        code: string
+        seen: timestamp
+    }
+}
+
+dataset sales = sales_raw |> derive {
+    wide = to_decimal(amount, 18, 2)
+    fine = to_decimal(amount, 18, 4)
+    precise = to_decimal(amount, 12, 6)
+    huge = to_decimal(amount, 38, 1)
+    root = duckdb.sqrt(amount)
+}
+
+export sales to "out/sales.parquet"
+
+model typed {
+    table sales
+    metric first_day { value: min(sales.day) }
+    metric last_seen { value: max(sales.seen) }
+    metric revenue { value: sum(sales.amount) }
+    metric sales_count { value: count(sales.sale_id) }
+}

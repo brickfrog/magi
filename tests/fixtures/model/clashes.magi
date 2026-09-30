@@ -1,0 +1,23 @@
+# Power BI needs unique object names (ignoring case): measures differ from every column.
+
+source sales = csv("sales.csv")
+source customers = csv("customers.csv")
+
+export sales to "sales.parquet"
+export customers to "customers.parquet"
+
+model clashes {
+    metric amount {
+        value: max(sales.amount)
+    }
+    metric Region {
+        value: count(sales.sale_id)
+    }
+    metric orders {
+        value: count(sales.sale_id)
+    }
+    metric Orders {
+        value: count(sales.qty)
+    }
+    dimension customer_id = customers.region
+}

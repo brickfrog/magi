@@ -1,0 +1,3 @@
+source n = csv("n.csv")
+dataset d = n |> derive { g = 1 } |> derive { r = regexp_extract(code, "(A)", g) }
+export d to "out/d.csv"

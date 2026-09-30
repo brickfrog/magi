@@ -1,0 +1,9 @@
+# Excel inference traps: a number column with text in it, and a sheet whose header is not on
+# the first row. `magi check` reports both.
+
+source mixed = excel("workbook.xlsx") { sheet: "Mixed" }
+
+source report = excel("workbook.xlsx") { sheet: "Report" }
+
+export mixed to "out/mixed.csv"
+export report to "out/report.csv"

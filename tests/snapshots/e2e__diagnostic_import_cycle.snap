@@ -1,0 +1,14 @@
+---
+source: tests/e2e.rs
+expression: "check_stderr(\"errors\", \"cycle_a.magi\")"
+---
+error[M004]
+
+  × import cycle
+   ╭─[cycle_b.magi:1:8]
+ 1 │ import "cycle_a.magi"
+   ·        ───────┬──────
+   ·               ╰── `cycle_a.magi` is already being imported
+ 2 │ 
+   ╰────
+1 error(s), 0 warning(s)

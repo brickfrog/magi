@@ -1,0 +1,23 @@
+# Every export format, read back by read.magi.
+
+source sales = csv("sales.csv") {
+    identity id
+    schema { id: int, region: string, amount: decimal(10,2)?, day: date }
+}
+
+dataset totals = sales
+    |> group by region
+    |> aggregate {
+        orders = count()
+        total = sum(amount)
+        first_day = min(day)
+    }
+    |> sort region
+
+export totals to "out/totals.csv"
+export totals to "out/totals.parquet"
+export totals to "out/totals.json"
+export totals to "out/totals.jsonl"
+export to "out/report.xlsx" {
+    sheet "Totals" = totals
+}

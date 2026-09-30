@@ -1,0 +1,16 @@
+# The smallest useful reconciliation, for the generated-SQL snapshot.
+
+source ledger = csv("ledger.csv") {
+    identity ref
+    schema { ref: string, region: string, value: decimal(10,2), day: date }
+}
+
+dataset left = ledger |> select ref, region, value
+dataset right = ledger |> select ref, region, value
+
+reconcile pair = left as l with right as r {
+    block by region
+    tier exact { require l.value == r.value }
+}
+
+export pair.matches to "out/matches.csv"

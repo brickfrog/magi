@@ -1,0 +1,3 @@
+source n = csv("n.csv")
+dataset d = n |> derive { r = duckdb.range(2), l = duckdb.lower(code) }
+export d to "out/d.csv"

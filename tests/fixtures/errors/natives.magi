@@ -1,0 +1,6 @@
+source n = csv("overflow.csv") { schema { id: int, v: int, code: string } }
+
+# `duckdb.jaro_winkler` does not exist: DuckDB calls it jaro_winkler_similarity
+dataset similar = n |> derive s = duckdb.jaro_winkler(code, "abc")
+
+dataset shuffled = n |> derive r = duckdb.random()

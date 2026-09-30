@@ -1,0 +1,17 @@
+# A1 fits both B ranges (tied on the A side); B102 fits both A amounts (tied on the B side).
+
+source a = csv("tied_a.csv") { identity id }
+source b = csv("tied_b.csv") { identity id }
+
+reconcile r = a with b {
+    block by org
+    tier range {
+        require a.amt >= b.lo and a.amt <= b.hi
+    }
+}
+
+export r.matches to "out/matches.csv"
+export r.ambiguous to "out/ambiguous.csv"
+export r.unmatched_a to "out/unmatched_a.csv"
+export r.unmatched_b to "out/unmatched_b.csv"
+export r.summary to "out/summary.csv"

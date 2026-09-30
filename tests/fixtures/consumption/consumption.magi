@@ -1,0 +1,71 @@
+# One-to-one consumption.
+#   k = X: a1 = b1 exactly in tier 1; which rows tier 2 may still use depends on `consume`.
+#   k = Y: a2's best is b3 but b3 prefers a3: a3-b3 pair first, then a2-b4.
+#   k = W: `many_to_one` lets several A rows share one B row.
+
+source a = csv("a.csv") { identity id }
+source b = csv("b.csv") { identity id }
+
+dataset xy_a = a |> filter k != "W"
+dataset xy_b = b |> filter k != "W"
+
+reconcile both = xy_a as a with xy_b as b {
+    block by k
+    consume both
+    tier exact { require a.amt == b.amt }
+    tier near {
+        require abs(a.amt - b.amt) <= 5
+        rank by abs(a.amt - b.amt)
+    }
+}
+
+reconcile none = xy_a as a with xy_b as b {
+    block by k
+    consume none
+    tier exact { require a.amt == b.amt }
+    tier near {
+        require abs(a.amt - b.amt) <= 5
+        rank by abs(a.amt - b.amt)
+    }
+}
+
+reconcile only_a = xy_a as a with xy_b as b {
+    block by k
+    consume a
+    tier exact { require a.amt == b.amt }
+    tier near {
+        require abs(a.amt - b.amt) <= 5
+        rank by abs(a.amt - b.amt)
+    }
+}
+
+reconcile only_b = xy_a as a with xy_b as b {
+    block by k
+    consume b
+    tier exact { require a.amt == b.amt }
+    tier near {
+        require abs(a.amt - b.amt) <= 5
+        rank by abs(a.amt - b.amt)
+    }
+}
+
+reconcile many = a with b {
+    block by k
+    cardinality many_to_one
+    tier exact { require a.amt == b.amt }
+}
+export both.matches to "out/both_matches.csv"
+export both.unmatched_a to "out/both_unmatched_a.csv"
+export both.unmatched_b to "out/both_unmatched_b.csv"
+export none.matches to "out/none_matches.csv"
+export none.unmatched_a to "out/none_unmatched_a.csv"
+export none.unmatched_b to "out/none_unmatched_b.csv"
+export only_a.matches to "out/only_a_matches.csv"
+export only_a.unmatched_a to "out/only_a_unmatched_a.csv"
+export only_a.unmatched_b to "out/only_a_unmatched_b.csv"
+export only_b.matches to "out/only_b_matches.csv"
+export only_b.unmatched_a to "out/only_b_unmatched_a.csv"
+export only_b.unmatched_b to "out/only_b_unmatched_b.csv"
+export many.matches to "out/many_matches.csv"
+export many.unmatched_a to "out/many_unmatched_a.csv"
+export many.unmatched_b to "out/many_unmatched_b.csv"

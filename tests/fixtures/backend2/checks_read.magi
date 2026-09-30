@@ -1,0 +1,2 @@
+source c = parquet("checks.parquet")
+export c to "checks_back.csv"

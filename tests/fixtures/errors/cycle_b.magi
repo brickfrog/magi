@@ -1,0 +1,3 @@
+import "cycle_a.magi"
+
+dataset x = a |> select id

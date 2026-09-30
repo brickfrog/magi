@@ -1,0 +1,29 @@
+# Decimal precision: decimal arithmetic is exact where binary floats are not.
+
+source amounts = csv("amounts.csv") {
+    identity id
+    schema { id: int, amount: decimal(10,2), grams: int, kg: decimal(10,3) }
+}
+
+dataset converted = amounts
+    |> derive {
+        grams_as_kg = grams * 0.001
+        same_kg = grams * 0.001 == kg
+        float_same_kg = to_float(grams) * to_float(0.001) == to_float(kg)
+    }
+    |> select id, amount, grams_as_kg, same_kg, float_same_kg
+    |> sort id
+
+dataset totals = amounts
+    |> filter id <= 2
+    |> aggregate {
+        total = sum(amount)
+        float_total = sum(to_float(amount))
+    }
+    |> derive {
+        total_is_03 = total == 0.3
+        float_total_is_03 = float_total == to_float(0.3)
+    }
+
+export converted to "out/converted.csv"
+export totals to "out/totals.csv"

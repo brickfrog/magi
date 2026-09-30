@@ -1,0 +1,25 @@
+# consume none: every tier sees every row, but a pair matched once is never matched again.
+#   same: a1-b1 and a2-b2 in tier exact, so tier near must pair a1-b2 and a2-b1.
+#   roll: a1-b1 in tier exact; the group {a1, a2} contains that pair, so it is not a candidate.
+source same_a = csv("same_a.csv") { identity id }
+source same_b = csv("same_b.csv") { identity id }
+source roll_a = csv("roll_a.csv") { identity id }
+source roll_b = csv("roll_b.csv") { identity id }
+
+reconcile same = same_a as a with same_b as b {
+    block by k
+    consume none
+    tier exact { require a.amt == b.amt }
+    tier near { require abs(a.amt - b.amt) <= 5  rank by abs(a.amt - b.amt) }
+}
+
+reconcile roll = roll_a as a with roll_b as b {
+    block by k
+    consume none
+    tier exact { require a.amt == b.amt }
+    tier roll { many a to one b  group a by k  require sum(a.amt) == b.amt }
+}
+
+export same.matches to "out/same_matches.csv"
+export roll.matches to "out/roll_matches.csv"
+export roll.candidates to "out/roll_candidates.csv"

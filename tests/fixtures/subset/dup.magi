@@ -1,0 +1,97 @@
+# b1 and b2 are exact duplicates (equal in every column but the identity).
+#   one:   a1 = 100 is b1 or b2: one candidate; b1 matches, b2 is its duplicate
+#   two:   a1 = 300 = 100 + 200: b1 + b3 match, b2 is a duplicate of b1
+#   hold / cont: as `two`, then tier `single` matches a2 = 100 exactly; with
+#          `duplicates continue` b2 is still available to it
+#   clash: a1 = 300 is b1 + b3 and a2 = 100 is b1, whose copy b2 serves a2: both match;
+#          a2b (100) is left out of tier `sums` and finds no row in tier `single`
+#   contest: a1, a2, a3 need three rows of 100, there are two copies: all three are
+#          ambiguous with both copies, which stay out of tier `single` (a4)
+source one_a = csv("dup_one_a.csv") { identity id }
+source two_a = csv("dup_two_a.csv") { identity id }
+source pay_a = csv("dup_pay_a.csv") { identity id }
+source clash_a = csv("dup_clash_a.csv") { identity id }
+source contest_a = csv("dup_contest_a.csv") { identity id }
+source dup_b = csv("dup_b.csv") { identity id }
+
+reconcile one = one_a as a with dup_b as b {
+    block by none
+    tier sums { subset b max_items 1  require sum(b.amount) == a.amount }
+}
+
+reconcile two = two_a as a with dup_b as b {
+    block by none
+    tier sums { subset b max_items 3  require sum(b.amount) == a.amount }
+}
+
+reconcile hold = pay_a as a with dup_b as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require a.kind == "payout"
+        require sum(b.amount) == a.amount
+    }
+    tier single { require a.amount == b.amount }
+}
+
+reconcile cont = pay_a as a with dup_b as b {
+    block by none
+    duplicates continue
+    tier sums {
+        subset b max_items 3
+        require a.kind == "payout"
+        require sum(b.amount) == a.amount
+    }
+    tier single { require a.amount == b.amount }
+}
+
+reconcile clash = clash_a as a with dup_b as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require not starts_with(a.id, "x")
+        require sum(b.amount) == a.amount
+    }
+    tier single { require a.amount == b.amount }
+}
+
+reconcile contest = contest_a as a with dup_b as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require not starts_with(a.id, "x")
+        require sum(b.amount) == a.amount
+    }
+    tier single { require a.amount == b.amount }
+}
+
+export one.matches to "out/one_matches.csv"
+export one.ambiguous to "out/one_ambiguous.csv"
+export one.unmatched_a to "out/one_unmatched_a.csv"
+export one.unmatched_b to "out/one_unmatched_b.csv"
+export one.summary to "out/one_summary.csv"
+export two.matches to "out/two_matches.csv"
+export two.ambiguous to "out/two_ambiguous.csv"
+export two.unmatched_a to "out/two_unmatched_a.csv"
+export two.unmatched_b to "out/two_unmatched_b.csv"
+export two.summary to "out/two_summary.csv"
+export hold.matches to "out/hold_matches.csv"
+export hold.ambiguous to "out/hold_ambiguous.csv"
+export hold.unmatched_a to "out/hold_unmatched_a.csv"
+export hold.unmatched_b to "out/hold_unmatched_b.csv"
+export hold.summary to "out/hold_summary.csv"
+export cont.matches to "out/cont_matches.csv"
+export cont.ambiguous to "out/cont_ambiguous.csv"
+export cont.unmatched_a to "out/cont_unmatched_a.csv"
+export cont.unmatched_b to "out/cont_unmatched_b.csv"
+export cont.summary to "out/cont_summary.csv"
+export clash.matches to "out/clash_matches.csv"
+export clash.ambiguous to "out/clash_ambiguous.csv"
+export clash.unmatched_a to "out/clash_unmatched_a.csv"
+export clash.unmatched_b to "out/clash_unmatched_b.csv"
+export clash.summary to "out/clash_summary.csv"
+export contest.matches to "out/contest_matches.csv"
+export contest.ambiguous to "out/contest_ambiguous.csv"
+export contest.unmatched_a to "out/contest_unmatched_a.csv"
+export contest.unmatched_b to "out/contest_unmatched_b.csv"
+export contest.summary to "out/contest_summary.csv"

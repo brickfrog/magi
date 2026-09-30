@@ -1,0 +1,6 @@
+source a = csv("a.csv")
+dataset d = a
+    |> filter -(-amount) > 0 or (amount > 0) == flag
+    |> derive { y = -(-amount)  z = - -1.5  w = -(-5) }
+validate a { expect -(-count()) > 1 }
+export d to "d.csv"

@@ -1,0 +1,3 @@
+import "cycle_b.magi"
+
+source a = csv("a.csv") { identity id }

@@ -1,0 +1,2 @@
+source a = csv("rounded.csv") { schema { id: int  big: decimal(10,2)? } }
+export a to "out/rounded.csv"

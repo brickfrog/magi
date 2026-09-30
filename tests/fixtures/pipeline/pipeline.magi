@@ -1,0 +1,56 @@
+# A small pipeline used for plan/sql/explain snapshots, export ordering and reproducibility.
+
+source sales = csv("sales.csv") {
+    identity id
+    schema { id: int, region: string, product: string, amount: decimal(10,2)?, day: date }
+}
+
+source ledger = csv("ledger.csv") {
+    identity ref
+    schema { ref: string, region: string, value: decimal(10,2), day: date }
+}
+
+dataset priced = sales
+    |> filter amount is not null
+    |> derive {
+        net = amount * 0.8
+        month = month(day)
+    }
+
+# sorted by region only: ties are broken by all columns on export
+dataset by_region = priced
+    |> select region, product, amount
+    |> sort region desc
+
+# no sort at all: exported in order of all columns
+dataset unsorted = priced |> select product, id
+
+dataset totals = priced
+    |> group by region
+    |> aggregate {
+        orders = count()
+        total = sum(amount)
+    }
+    |> sort total desc
+
+reconcile books = priced as s with ledger as l {
+    block by region
+    tier same_day {
+        require s.day == l.day
+        require s.amount == l.value
+    }
+    tier any_day {
+        require s.amount == l.value
+    }
+}
+
+export by_region to "out/by_region.csv"
+export unsorted to "out/unsorted.csv"
+export totals to "out/totals.csv"
+export totals to "out/totals.parquet"
+export books.matches to "out/matches.csv"
+export books.summary to "out/summary.csv"
+export to "out/report.xlsx" {
+    sheet "Totals" = totals
+    sheet "Matches" = books.matches
+}

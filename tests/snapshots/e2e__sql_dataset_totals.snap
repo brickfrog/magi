@@ -1,0 +1,18 @@
+---
+source: tests/e2e.rs
+expression: fx.normalize(&out.stdout)
+---
+CREATE OR REPLACE TEMP TABLE "totals" AS
+WITH "__magi_step_1" AS (
+  SELECT "region", count(*) AS "orders", CAST(sum("amount") AS DECIMAL(38,2)) AS "total"
+  FROM "priced"
+  GROUP BY 1
+),
+"__magi_step_2" AS (
+  SELECT *
+  FROM "__magi_step_1"
+  ORDER BY "total" DESC NULLS LAST, "region" ASC NULLS LAST, "orders" ASC NULLS LAST
+)
+SELECT *
+FROM "__magi_step_2"
+ORDER BY "total" DESC NULLS LAST, "region" ASC NULLS LAST, "orders" ASC NULLS LAST;

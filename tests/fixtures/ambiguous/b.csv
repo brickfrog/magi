@@ -1,0 +1,7 @@
+id,k,amt,desc,memo,extra
+b1,X,10,widget,p,
+b2,X,10,widget,q,
+b3,Y,5,bolt,,one
+b4,Y,5,bolt,,two
+b5,Z,7,red box,,
+b6,Z,7,blue crate,,

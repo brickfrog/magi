@@ -1,0 +1,5 @@
+source a = csv("a.csv")
+dataset d = a |> filter x > 1 && x < 5
+dataset e = a |> fliter x
+dataset f = nothere
+dataset g = d

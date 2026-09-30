@@ -1,0 +1,55 @@
+# Every row ends with exactly one status: matched, ambiguous, duplicate or unmatched.
+#   mo: A 1 ties between B 101 and 102 (distinguishable), A 2 matches B 103.
+#   om: B 101 and 102 each tie between A 1/2 (exact duplicates) and A 4; B 103 matches A 3.
+#   pc: A 1 fits both B ranges and B 102 fits both A amounts; nothing is held.
+#   p:  the same with holding; the edge 1-102 is tied from both sides.
+source mo_a = csv("mo_a.csv") { identity id }
+source mo_b = csv("mo_b.csv") { identity id }
+source om_a = csv("om_a.csv") { identity id }
+source om_b = csv("om_b.csv") { identity id }
+source range_a = csv("range_a.csv") { identity id }
+source range_b = csv("range_b.csv") { identity id }
+
+reconcile mo = mo_a as a with mo_b as b {
+    block by org
+    cardinality many_to_one
+    tier t { require a.amt == b.amt }
+}
+
+reconcile om = om_a as a with om_b as b {
+    block by org
+    cardinality one_to_many
+    tier t { require a.amt == b.amt  rank by b.id desc }
+}
+
+reconcile pc = range_a as a with range_b as b {
+    block by org
+    ambiguity continue
+    tier range { require a.amt >= b.lo and a.amt <= b.hi }
+}
+
+reconcile p = range_a as a with range_b as b {
+    block by org
+    tier range { require a.amt >= b.lo and a.amt <= b.hi }
+}
+
+export mo.matches to "out/mo_matches.csv"
+export mo.ambiguous to "out/mo_ambiguous.csv"
+export mo.unmatched_a to "out/mo_unmatched_a.csv"
+export mo.unmatched_b to "out/mo_unmatched_b.csv"
+export mo.summary to "out/mo_summary.csv"
+export om.matches to "out/om_matches.csv"
+export om.ambiguous to "out/om_ambiguous.csv"
+export om.unmatched_a to "out/om_unmatched_a.csv"
+export om.unmatched_b to "out/om_unmatched_b.csv"
+export om.summary to "out/om_summary.csv"
+export pc.matches to "out/pc_matches.csv"
+export pc.ambiguous to "out/pc_ambiguous.csv"
+export pc.unmatched_a to "out/pc_unmatched_a.csv"
+export pc.unmatched_b to "out/pc_unmatched_b.csv"
+export pc.summary to "out/pc_summary.csv"
+export p.matches to "out/p_matches.csv"
+export p.ambiguous to "out/p_ambiguous.csv"
+export p.unmatched_a to "out/p_unmatched_a.csv"
+export p.unmatched_b to "out/p_unmatched_b.csv"
+export p.summary to "out/p_summary.csv"

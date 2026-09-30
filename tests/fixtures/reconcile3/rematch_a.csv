@@ -1,0 +1,7 @@
+id,case,step,ref,amount
+a0,hi,1,B2,100
+a1,hi,2,,100
+a3,hi,3,B2,100
+c0,lo,1,B1,100
+c1,lo,2,,100
+c3,lo,3,B2,100

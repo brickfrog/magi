@@ -1,0 +1,5 @@
+source n = csv("overflow.csv") { schema { id: int, v: int, code: string } }
+
+dataset parsed = n |> derive d = duckdb.strptime(code, "%Y-%m-%d")
+
+export parsed to "out/parsed.csv"

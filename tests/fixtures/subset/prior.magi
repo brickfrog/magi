@@ -1,0 +1,19 @@
+# consume a: B rows stay available. B2 matches a0 by reference first; in tier `sums` a1 takes
+# B1, and B2 (matched before) is no duplicate, so tier `again` matches a3 with B2 by reference.
+source pa = csv("prior_a.csv") { identity id }
+source pb = csv("prior_b.csv") { identity id }
+
+reconcile prior = pa as a with pb as b {
+    block by none
+    consume a
+    tier byref { require a.ref == b.id and a.id != "a3" }
+    tier sums {
+        subset b max_items 1
+        require a.id == "a1"
+        require sum(b.amount) == a.amount
+    }
+    tier again { require a.ref == b.id and a.id == "a3" }
+}
+
+export prior.matches to "out/prior_matches.csv"
+export prior.unmatched_b to "out/prior_unmatched_b.csv"

@@ -1,0 +1,5 @@
+/target
+# local build aids: synthetic datasets with their answer keys, and the example programs run on them
+/data/
+/examples/
+*.magi-tmp

@@ -1,0 +1,5 @@
+source t = csv("t.csv")
+
+dataset d = t |> derive { day = today() }
+
+export d to "out/d.csv"

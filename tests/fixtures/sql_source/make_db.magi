@@ -1,0 +1,10 @@
+# Builds warehouse.duckdb from a CSV (run first by the test).
+
+source orders = csv("orders.csv") {
+    identity id
+    schema { id: int, customer: string, amount: decimal(10,2), day: date }
+}
+
+export to "warehouse.duckdb" {
+    table "orders" = orders
+}

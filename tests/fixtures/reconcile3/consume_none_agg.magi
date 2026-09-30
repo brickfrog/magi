@@ -1,0 +1,40 @@
+# With `consume none` a pair matched once is never matched again, so which A row pairs with which
+# B row in tier `amount` decides what the subset tier can still match. The A rows differ only in
+# `fee`, which only an aggregate reads; fee1.csv and fee2.csv swap the fees between the two ids.
+# The outcome must not depend on that labelling.
+source fee1 = csv("fee1.csv") { identity id }
+source fee2 = csv("fee2.csv") { identity id }
+source cust = csv("fee_cust.csv") { identity id }
+
+reconcile r1 = fee1 as a with cust as b {
+    consume none
+    block by none
+    tier amount {
+        require a.amt == b.amt
+        evidence { customer = b.cust }
+    }
+    tier fee {
+        subset a max_items 1
+        require b.cust == "Y"
+        require sum(a.fee) == 5
+    }
+}
+
+reconcile r2 = fee2 as a with cust as b {
+    consume none
+    block by none
+    tier amount {
+        require a.amt == b.amt
+        evidence { customer = b.cust }
+    }
+    tier fee {
+        subset a max_items 1
+        require b.cust == "Y"
+        require sum(a.fee) == 5
+    }
+}
+
+export r1.matches to "out/r1_matches.csv"
+export r1.ambiguous to "out/r1_ambiguous.csv"
+export r2.matches to "out/r2_matches.csv"
+export r2.ambiguous to "out/r2_ambiguous.csv"

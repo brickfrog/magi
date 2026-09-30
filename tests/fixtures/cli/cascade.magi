@@ -1,0 +1,16 @@
+# Two declarations fail to parse; references to them must not be reported again.
+
+source t = csv("t.csv")
+
+dataset broken = t |> fliter id > 1
+
+reconcile r = t as a with t as b {
+    block by id
+    tier exact { require a.id == }
+}
+
+dataset later = broken |> derive { z = 1 }
+
+export later to "out/later.csv"
+export r.matches to "out/matches.csv"
+export missing to "out/missing.csv"

@@ -1,0 +1,25 @@
+# SQL source extraction over ODBC (SQLite driver). The test creates shop.db and passes the
+# connection string in MAGI_TEST_ODBC; nothing secret is written in the program.
+
+connection shop = odbc { connection_string: env("MAGI_TEST_ODBC") }
+
+source items = sql(shop) {
+    query: "SELECT id, name, amount, sold_on FROM items"
+    identity id
+    schema { id: int, name: string?, amount: decimal(10,2)?, sold_on: date? }
+}
+
+source untyped = sql(shop) {
+    query: "SELECT name, count(*) AS n FROM items WHERE name IS NOT NULL GROUP BY name"
+    identity name
+}
+
+dataset big = items
+    |> filter amount >= 10
+    |> select id, name, amount, sold_on
+    |> sort id
+
+export items to "out/items.csv"
+export untyped to "out/untyped.csv"
+export big to "out/big.csv"
+export items.rejects to "out/rejects.csv"

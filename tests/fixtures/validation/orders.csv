@@ -1,0 +1,5 @@
+id,customer,amount
+1,acme,10
+2,globex,-5
+3,,7
+3,initech,4

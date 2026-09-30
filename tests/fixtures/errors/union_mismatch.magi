@@ -1,0 +1,11 @@
+source a = csv("a.csv") {
+    identity id
+    schema { id: int, org: string, amount: int }
+}
+source b = csv("b.csv") {
+    identity id
+    schema { id: int, org: string, total: int }
+}
+
+dataset both = a |> union b
+export both to "out/both.csv"

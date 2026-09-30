@@ -1,0 +1,9 @@
+source sales_raw = csv("sales.csv")
+
+dataset sales = sales_raw
+
+export sales to "out/sales.parquet"
+
+model shop {
+    metric revenue { value: sum(sales.amount) }
+}

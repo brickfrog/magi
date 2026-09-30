@@ -1,0 +1,32 @@
+# a1 = b3 = b1 + b2: two subsets are equally good without `rank by`; ranking by the number of
+# rows picks b3 alone.
+source ta = csv("tie_a.csv") { identity id }
+source tb = csv("tie_b.csv") { identity id }
+
+reconcile tie = ta as a with tb as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) == a.amount
+    }
+}
+
+reconcile smallest = ta as a with tb as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) == a.amount
+        rank by count(b.id)
+    }
+}
+
+export tie.matches to "out/tie_matches.csv"
+export tie.ambiguous to "out/tie_ambiguous.csv"
+export tie.unmatched_a to "out/tie_unmatched_a.csv"
+export tie.unmatched_b to "out/tie_unmatched_b.csv"
+export tie.summary to "out/tie_summary.csv"
+export smallest.matches to "out/smallest_matches.csv"
+export smallest.ambiguous to "out/smallest_ambiguous.csv"
+export smallest.unmatched_a to "out/smallest_unmatched_a.csv"
+export smallest.unmatched_b to "out/smallest_unmatched_b.csv"
+export smallest.summary to "out/smallest_summary.csv"

@@ -1,0 +1,16 @@
+# identity [ref, entry]: (R1,1) and (R2,1) differ only in the identity, but the tier counts
+# distinct refs, so they are not interchangeable: a1 = (R2,1) + (R1,2) has two refs.
+source ca = csv("comp_a.csv") { identity id }
+source cb = csv("comp_b.csv")
+
+reconcile comp = ca as a with cb as b {
+    identity b: [ref, entry]
+    block by none
+    tier t {
+        subset b max_items 2
+        require sum(b.amount) == a.amount
+        require count_distinct(b.ref) == 2
+    }
+}
+
+export comp.matches to "out/comp_matches.csv"

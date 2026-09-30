@@ -1,0 +1,2 @@
+source a = csv("a.csv")
+dataset d = a |> filter x == "unterminated

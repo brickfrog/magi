@@ -1,0 +1,3 @@
+# A declared numeric type reads the same text as numbers.
+source s = csv("ids.csv") { schema { acct: decimal(38,0)  code: int } }
+export s to "out/ids.csv"

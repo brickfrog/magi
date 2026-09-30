@@ -1,0 +1,4 @@
+# `int` rejects fractions; a declared time format is applied; 12.500 fits decimal(10,2).
+source a = csv("values.csv") { schema { id: int  amount: int?  t: time("%H.%M")?  big: decimal(10,2)? } }
+export a to "out/values.csv"
+export a.rejects to "out/rejects.csv"

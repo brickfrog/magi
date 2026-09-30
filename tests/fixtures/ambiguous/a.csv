@@ -1,0 +1,5 @@
+id,k,amt,desc,note,extra
+a1,X,10,widget,p,
+a3,Y,5,bolt,,first
+a4,Y,5,bolt,,second
+a5,Z,7,red box,,

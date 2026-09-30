@@ -1,0 +1,34 @@
+# `ambiguity continue`: ambiguous rows are reported and stay available to later tiers.
+#   k = X: one A row, two B rows that agree on every compared value but differ in `memo`
+#   k = Y: two A rows and two B rows that are policy-equal (differ only in `extra`): paired
+#   k = Z: two B rows with the same amount; ranking by description similarity picks one
+
+source a = csv("a.csv") { identity id }
+source b = csv("b.csv") { identity id }
+
+reconcile r = a with b {
+    block by k
+    ambiguity continue
+    tier exact {
+        require a.amt == b.amt
+        rank by similarity(a.desc, b.desc) desc
+    }
+    tier by_memo {
+        require a.note == b.memo
+    }
+}
+
+# the same without ranking: nothing distinguishes b5 from b6 any more
+reconcile unranked = a with b {
+    block by k
+    tier exact { require a.amt == b.amt }
+}
+
+export r.matches to "out/matches.csv"
+export r.ambiguous to "out/ambiguous.csv"
+export r.candidates to "out/candidates.csv"
+export r.unmatched_a to "out/unmatched_a.csv"
+export r.unmatched_b to "out/unmatched_b.csv"
+export r.summary to "out/summary.csv"
+export unranked.matches to "out/unranked_matches.csv"
+export unranked.ambiguous to "out/unranked_ambiguous.csv"

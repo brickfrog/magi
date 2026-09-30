@@ -1,0 +1,17 @@
+# Exact duplicates: a1/a2 and b4/b5 are identical in every column but their identity.
+# `duplicates continue`: the leftover stays available to later tiers.
+
+source a = csv("a.csv") { identity id }
+source b = csv("b.csv") { identity id }
+
+reconcile r = a with b {
+    block by k
+    duplicates continue
+    tier exact { require a.amt == b.amt }
+    tier near { require abs(a.amt - b.amt) <= 1 }
+}
+
+export r.matches to "out/matches.csv"
+export r.unmatched_a to "out/unmatched_a.csv"
+export r.unmatched_b to "out/unmatched_b.csv"
+export r.summary to "out/summary.csv"

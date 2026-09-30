@@ -1,0 +1,4 @@
+# Real date cells (ISO) and text dates in the declared format share a column.
+source s = excel("cells.xlsx") { sheet: "Codes"  schema { d: date("%d/%m/%Y") } }
+export s to "out/dates.csv"
+export s.rejects to "out/rejects.csv"

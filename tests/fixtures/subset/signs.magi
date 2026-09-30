@@ -1,0 +1,47 @@
+# Pruning by a sum target keeps every candidate: with a negative member (p1 = 60 + 50 - 10) and
+# with a null member (which ties every subset), `sum(b.amount) == a.amount` (pruned) gives the
+# same results as `sum(b.amount) - a.amount == 0` (no sum target, not pruned).
+source sa = csv("signs_a.csv") { identity id }
+source sb = csv("signs_b.csv") { identity id }
+source sbn = csv("signs_b_null.csv") { identity id }
+
+reconcile pruned = sa as a with sb as b {
+    block by none
+    tier sums {
+        subset b max_items 4
+        require sum(b.amount) == a.amount
+    }
+}
+
+reconcile plain = sa as a with sb as b {
+    block by none
+    tier sums {
+        subset b max_items 4
+        require sum(b.amount) - a.amount == 0
+    }
+}
+
+reconcile pruned_null = sa as a with sbn as b {
+    block by none
+    tier sums {
+        subset b max_items 4
+        require sum(b.amount) == a.amount
+    }
+}
+
+reconcile plain_null = sa as a with sbn as b {
+    block by none
+    tier sums {
+        subset b max_items 4
+        require sum(b.amount) - a.amount == 0
+    }
+}
+
+export pruned.matches to "out/pruned_matches.csv"
+export pruned.ambiguous to "out/pruned_ambiguous.csv"
+export plain.matches to "out/plain_matches.csv"
+export plain.ambiguous to "out/plain_ambiguous.csv"
+export pruned_null.matches to "out/pruned_null_matches.csv"
+export pruned_null.ambiguous to "out/pruned_null_ambiguous.csv"
+export plain_null.matches to "out/plain_null_matches.csv"
+export plain_null.ambiguous to "out/plain_null_ambiguous.csv"

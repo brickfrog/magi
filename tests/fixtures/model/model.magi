@@ -1,0 +1,37 @@
+source sales_raw = csv("sales.csv") {
+    schema {
+        sale_id: int
+        customer_id: int
+        amount: decimal(12, 2)
+        qty: int
+    }
+}
+
+source customers_raw = csv("customers.csv")
+
+dataset sales = sales_raw
+dataset customers = customers_raw
+
+export sales to "out/sales.parquet"
+export customers to "out/customers.parquet"
+
+model sales_model {
+    relationship sales.customer_id -> customers.customer_id
+    dimension region_name = customers.region {
+        description: "Sales region"
+    }
+
+    metric revenue {
+        value: sum(sales.amount)
+        format: currency
+        description: "Recognised revenue"
+    }
+
+    metric average_price {
+        value: sum(sales.amount) / sum(sales.qty)
+    }
+
+    metric orders {
+        value: count(sales.sale_id)
+    }
+}
