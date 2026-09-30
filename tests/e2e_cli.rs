@@ -190,3 +190,39 @@ fn explain_describes_the_consume_policy() {
         );
     }
 }
+
+/// `magi fmt` takes directories: every `.magi` file below them is checked or rewritten (hidden
+/// entries and other files are left alone), and `--check` names every unformatted file.
+#[test]
+fn fmt_formats_every_program_under_a_directory() {
+    let f = Fixture::new("fmt");
+    let messy = f.read("messy.magi");
+    let out = f.magi(&["fmt", "--check", "."]);
+    out.assert_code(1);
+    let listed: Vec<&str> = out.stderr.lines().collect();
+    assert_eq!(
+        listed,
+        [
+            "./messy.magi is not formatted",
+            "./sub/also_messy.magi is not formatted"
+        ],
+        "{}",
+        out.stderr
+    );
+    assert_eq!(f.read("messy.magi"), messy, "--check must not write");
+
+    f.magi(&["fmt", "."]).assert_code(0);
+    f.magi(&["fmt", "--check", "."]).assert_code(0);
+    assert_eq!(f.read("messy.magi"), f.read("ok.magi"));
+    assert_eq!(f.read("sub/also_messy.magi"), f.read("ok.magi"));
+    assert_eq!(f.read(".hidden/skipped.magi"), messy);
+    assert_eq!(f.read("notes.txt"), "not a program {\n");
+
+    let out = f.magi(&["fmt", "--stdout", "ok.magi", "sub"]);
+    out.assert_code(2);
+    assert!(
+        out.stderr.contains("`--stdout` prints one formatted file"),
+        "{}",
+        out.stderr
+    );
+}

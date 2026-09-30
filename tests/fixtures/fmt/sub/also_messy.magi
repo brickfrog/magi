@@ -1,0 +1,2 @@
+source a = csv("a.csv")
+dataset   b = a |> filter amount>0

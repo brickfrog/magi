@@ -132,13 +132,14 @@ enum Command {
         #[command(flatten)]
         today: Today,
     },
-    /// Format a program in canonical style
+    /// Format programs in canonical style (`.magi` files, or directories searched recursively)
     Fmt {
-        file: PathBuf,
-        /// Exit with an error if the file is not formatted (do not write)
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Exit with an error if a file is not formatted, listing each one (do not write)
         #[arg(long)]
         check: bool,
-        /// Print the formatted program instead of rewriting the file
+        /// Print the formatted program instead of rewriting the file (one file only)
         #[arg(long)]
         stdout: bool,
     },
@@ -284,10 +285,10 @@ pub fn main() -> ExitCode {
             today,
         } => trace(&file, &column, sources, today.date),
         Command::Fmt {
-            file,
+            paths,
             check,
             stdout,
-        } => fmt(&file, check, stdout),
+        } => fmt(&paths, check, stdout),
         Command::Compile {
             file,
             target,
@@ -908,32 +909,97 @@ fn trace(
     Ok(ExitCode::SUCCESS)
 }
 
-fn fmt(file: &Path, check: bool, stdout: bool) -> Result<ExitCode, ExitCode> {
-    let text = std::fs::read_to_string(file).map_err(|e| {
-        eprintln!("error: cannot read {}: {e}", file.display());
+/// The `.magi` files `paths` name: files as given, directories searched recursively (entries
+/// whose name starts with `.` skipped, symlinked directories not followed), each directory in
+/// name order so the output does not depend on the file system.
+fn magi_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        let err = |e: std::io::Error| format!("cannot read {}: {e}", dir.display());
+        let mut entries = std::fs::read_dir(dir)
+            .map_err(err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(err)?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            if e.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let path = e.path();
+            if e.file_type().map_err(err)?.is_dir() {
+                walk(&path, out)?;
+            } else if path.extension().is_some_and(|x| x == "magi") {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            let before = files.len();
+            walk(p, &mut files)?;
+            if files.len() == before {
+                return Err(format!("no `.magi` files in {}", p.display()));
+            }
+        } else {
+            files.push(p.clone());
+        }
+    }
+    Ok(files)
+}
+
+/// Formats every file and keeps going after a failure; the exit code is the worst outcome:
+/// 2 when a file cannot be read or written, 1 when one is not formatted (`--check`) or does not
+/// parse, else 0.
+fn fmt(paths: &[PathBuf], check: bool, stdout: bool) -> Result<ExitCode, ExitCode> {
+    let files = magi_files(paths).map_err(|e| {
+        eprintln!("error: {e}");
         ExitCode::from(2)
     })?;
+    if stdout && files.len() != 1 {
+        eprintln!(
+            "error: `--stdout` prints one formatted file; {} were given",
+            files.len()
+        );
+        return Err(ExitCode::from(2));
+    }
+    let mut worst = 0u8;
+    for file in &files {
+        let code = fmt_file(file, check, stdout);
+        worst = worst.max(code);
+    }
+    Ok(ExitCode::from(worst))
+}
+
+fn fmt_file(file: &Path, check: bool, stdout: bool) -> u8 {
+    let text = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", file.display());
+            return 2;
+        }
+    };
     match crate::fmt::format_source(0, &text) {
         Ok(formatted) => {
             if check {
                 if formatted != text {
                     eprintln!("{} is not formatted", file.display());
-                    return Ok(ExitCode::from(1));
+                    return 1;
                 }
             } else if stdout {
                 print!("{formatted}");
-            } else if formatted != text {
-                std::fs::write(file, formatted).map_err(|e| {
-                    eprintln!("error: cannot write {}: {e}", file.display());
-                    ExitCode::from(2)
-                })?;
+            } else if formatted != text
+                && let Err(e) = std::fs::write(file, formatted)
+            {
+                eprintln!("error: cannot write {}: {e}", file.display());
+                return 2;
             }
-            Ok(ExitCode::SUCCESS)
+            0
         }
         Err(diags) => {
             let loaded = load::load_text(file, text);
             print_diagnostics(&loaded, &diags, Severity::Note);
-            Ok(ExitCode::from(1))
+            1
         }
     }
 }

@@ -16,7 +16,7 @@ magi explain analysis.magi matches      # how a relation is computed
 magi sql     analysis.magi matches      # the DuckDB SQL `run` executes (whole program: settings first)
 magi schema  analysis.magi a            # columns of a source or relation
 magi trace   analysis.magi summary.total  # where a column's values come from
-magi fmt     analysis.magi              # canonical formatting
+magi fmt     analysis.magi lib/         # canonical formatting (files, or every .magi file in a directory)
 magi compile analysis.magi --target tmdl  # Power BI semantic model from `model` declarations
 ```
 
