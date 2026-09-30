@@ -3,3 +3,6 @@
 /data/
 /examples/
 *.magi-tmp
+# `magi snapshot` output holds every source row of a run
+*.snapshot.duckdb
+*.snapshot.duckdb.wal

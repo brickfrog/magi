@@ -658,6 +658,9 @@ file is replaced only once the new snapshot is complete. The exit code is 0, or 
 failed (the snapshot is still written) or the program could not run (nothing is written), or 2
 when a file cannot be read or written.
 
+A snapshot holds a full copy of every source row, so treat it like the source data: keep it out
+of version control (add `*.snapshot.duckdb` to `.gitignore`) or write it elsewhere with `--out`.
+
 `magi diff OLD NEW [--rows N] [--relation NAME]... [--today YYYY-MM-DD]` compares two runs;
 each side is a snapshot file or a program (a `.magi` file, run now as `magi snapshot` would).
 It first says which program files and inputs changed, were added or removed (by MD5), and a
