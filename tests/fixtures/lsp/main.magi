@@ -1,0 +1,16 @@
+# Zürich's sales against the ledger; the sources are declared in `lib.magi`.
+
+import "lib.magi"
+import "report.magi"
+
+dataset zurich = sales |> filter region == "Zürich"
+
+reconcile rec = zurich as s with ledger as l {
+    block by region
+
+    tier exact {
+        require s.amount == l.value
+    }
+}
+
+export rec.matches to "out/matches.csv"

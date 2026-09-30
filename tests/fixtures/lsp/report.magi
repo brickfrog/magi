@@ -1,0 +1,3 @@
+# Uses `rec`, which `main.magi` (the file importing this one) declares.
+
+export rec.unmatched_a to "out/unmatched_a.csv"

@@ -7,6 +7,7 @@ mod diagnostic;
 mod export;
 mod fmt;
 mod lineage;
+mod lsp;
 mod plan;
 mod reconcile;
 mod semantic;

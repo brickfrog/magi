@@ -75,7 +75,7 @@ pub fn parse_expr(file: FileId, src: &str) -> Result<Expr, Diagnostic> {
     Ok(e)
 }
 
-const STATEMENT_KEYWORDS: &[&str] = &[
+pub const STATEMENT_KEYWORDS: &[&str] = &[
     "import",
     "connection",
     "source",

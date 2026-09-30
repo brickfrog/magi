@@ -15,3 +15,4 @@
 - `src/source`, `src/export` — Excel (calamine / rust_xlsxwriter), ODBC (odbc-api), files.
 - `src/testing` — `test` declarations: a test's program (given sources, no exports), its run
   and the comparison with expected files (`magi test`).
+- `src/lsp` — the language server (`magi lsp`, see [`editors.md`](editors.md)).

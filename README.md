@@ -21,6 +21,7 @@ magi schema  analysis.magi a            # columns of a source or relation
 magi trace   analysis.magi summary.total  # where a column's values come from
 magi fmt     analysis.magi lib/         # canonical formatting (files, or every .magi file in a directory)
 magi compile analysis.magi --target tmdl  # Power BI semantic model from `model` declarations
+magi lsp                                # language server for editors, over stdio
 ```
 
 MAGI is a single binary with DuckDB linked in; the only system library it needs beyond the C
@@ -59,9 +60,10 @@ Both join inputs have a `category` column, so the program groups by `clean_a.cat
 
 - [`docs/language.md`](docs/language.md): the language: sources and source contracts,
   datasets, expressions and functions, validation, reconciliation, exports, BI models, runtime,
-  tests.
+  tests, snapshots and diffs.
 - [`docs/architecture.md`](docs/architecture.md): the compiler pipeline and the source layout.
 - [`docs/diagnostics.md`](docs/diagnostics.md): every diagnostic code.
+- [`docs/editors.md`](docs/editors.md): the language server (`magi lsp`) and editor setup.
 - [`docs/roadmap.md`](docs/roadmap.md): what is not implemented yet.
 
 ## Testing

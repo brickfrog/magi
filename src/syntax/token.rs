@@ -115,11 +115,9 @@ pub fn lex(file: FileId, src: &str) -> Lexed {
             _ => {}
         }
         let start = i;
-        let two = if i + 1 < bytes.len() {
-            &src[i..i + 2]
-        } else {
-            ""
-        };
+        // `get`: the next character may be non-ASCII (an unexpected `€`), so `i + 2` may not be a
+        // character boundary
+        let two = src.get(i..i + 2).unwrap_or("");
         let tok = match two {
             "|>" => Some(Tok::Pipe),
             "=>" => Some(Tok::FatArrow),

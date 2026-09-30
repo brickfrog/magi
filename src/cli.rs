@@ -168,6 +168,8 @@ enum Command {
         #[arg(long)]
         data_folder: Option<String>,
     },
+    /// Language server for editors, over stdio
+    Lsp,
 }
 
 fn color() -> bool {
@@ -182,7 +184,7 @@ fn print_diagnostics(loaded: &Loaded, diags: &[Diagnostic], min: Severity) {
 }
 
 /// Current UTC date as `YYYY-MM-DD`.
-fn utc_today() -> String {
+pub(crate) fn utc_today() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -327,6 +329,7 @@ pub fn main() -> ExitCode {
             out,
             data_folder,
         } => compile(&file, &target, out, data_folder.as_deref()),
+        Command::Lsp => Ok(crate::lsp::main()),
     };
     result.unwrap_or_else(|code| code)
 }

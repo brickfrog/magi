@@ -14,9 +14,12 @@ calamine = { version = "0.36", features = ["dates"] }
 clap = { version = "4.6", features = ["derive"] }
 duckdb = { version = "1.10505", features = ["bundled", "parquet", "json"] }
 encoding_rs = "0.8"
+lsp-server = "0.10"
+lsp-types = "0.95"
 miette = { version = "7.6", features = ["fancy"] }
 odbc-api = { version = "29.1", default-features = false, features = ["odbc_version_3_80"] }
 rust_xlsxwriter = "0.99"
+serde_json = "1"
 strsim = "0.11"
 thiserror = "2"
 tempfile = "3"

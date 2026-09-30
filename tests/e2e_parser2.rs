@@ -20,6 +20,17 @@ fn lexer_error_does_not_hide_later_errors() {
     assert_eq!(out.codes(), ["M001", "M001", "M002"], "{err}");
 }
 
+/// A non-ASCII character outside strings and comments is an unexpected character, not a crash
+/// (the lexer looks two bytes ahead for operators such as `|>`).
+#[test]
+fn non_ascii_character_is_a_lexer_error() {
+    let fx = Fixture::new("parser2");
+    let out = fx.check("nonascii.magi");
+    out.assert_code(1);
+    assert_eq!(out.codes(), ["M001"], "{}", out.stderr);
+    assert!(out.stderr_flat().contains("unexpected character `€`"));
+}
+
 /// A lex error in an imported file does not make the importer's references to that file's
 /// declarations unknown.
 #[test]

@@ -1,0 +1,19 @@
+# The inputs `main.magi` reads.
+
+source sales = csv("sales.csv") {
+    identity id
+    schema {
+        id: int
+        region: string
+        amount: decimal(10, 2)
+    }
+}
+
+source ledger = csv("ledger.csv") {
+    identity ref
+    schema {
+        ref: string
+        region: string
+        value: decimal(10, 2)
+    }
+}

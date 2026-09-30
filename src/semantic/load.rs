@@ -63,6 +63,16 @@ pub fn load(path: &Path) -> Result<Loaded, String> {
 
 /// Load from in-memory text (imports are still read from disk relative to `path`).
 pub fn load_text(path: &Path, text: String) -> Loaded {
+    load_text_with(path, text, &|p| std::fs::read_to_string(p))
+}
+
+/// Like [`load_text`], reading imported files through `read` (the language server passes the
+/// editor's unsaved buffers, falling back to disk).
+pub fn load_text_with(
+    path: &Path,
+    text: String,
+    read: &dyn Fn(&Path) -> std::io::Result<String>,
+) -> Loaded {
     let mut loader = Loader {
         loaded: Loaded {
             sources: SourceMap::default(),
@@ -72,19 +82,21 @@ pub fn load_text(path: &Path, text: String) -> Loaded {
         },
         seen: HashSet::new(),
         stack: Vec::new(),
+        read,
     };
     let name = path.display().to_string();
     loader.visit(path, name, text);
     loader.loaded
 }
 
-struct Loader {
+struct Loader<'r> {
     loaded: Loaded,
     seen: HashSet<PathBuf>,
     stack: Vec<PathBuf>,
+    read: &'r dyn Fn(&Path) -> std::io::Result<String>,
 }
 
-impl Loader {
+impl Loader<'_> {
     fn visit(&mut self, path: &Path, name: String, text: String) {
         let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let file = self.loaded.sources.add(path, name, text);
@@ -113,7 +125,7 @@ impl Loader {
             if self.seen.contains(&canon) {
                 continue;
             }
-            match std::fs::read_to_string(&target) {
+            match (self.read)(&target) {
                 Ok(text) => {
                     let display = target.display().to_string();
                     self.visit(&target, display, text);
