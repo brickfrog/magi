@@ -179,7 +179,8 @@ pub fn describe(hir: &Hir, plan: &PhysicalPlan) -> Vec<String> {
                             format!(
                                 "enumerate subsets of up to {} {side} rows per {other} {unit}, \
                                  extending a subset only while `{}` can still hold (by the \
-                                 remaining members' positive and negative values); the run stops \
+                                 largest and smallest sums that members after its last one can \
+                                 add in the places it has left); the run stops \
                                  when the subsets examined exceed max_subsets {}; a unit matches \
                                  its single best subset, units whose best subsets tie or share a \
                                  row are reported as ambiguous",

@@ -9,9 +9,10 @@
 //!    of Σ_{k=1..max_items} C(n, k) for a unit with n members (an upper bound) and stops (M315)
 //!    when that exceeds `max_subsets`. With a subset-level `require sum(x) == t` over an exact
 //!    `x` ([`Subset::sum_target`]), subsets are built level by level (size 1, 2, ...) and a
-//!    partial subset is extended only while the members after its last one can still bring its
-//!    sum to `t`; before each level the run adds the (subset, member) pairs that level examines
-//!    to a total and stops (M315) as soon as the total exceeds `max_subsets`.
+//!    partial subset of k members is extended only while at most `max_items - k` members after
+//!    its last one can still bring its sum to `t`; before each level the run adds the (subset,
+//!    member) pairs that level examines to a total and stops (M315) as soon as the total exceeds
+//!    `max_subsets`.
 //! 3. **Candidates.** Non-empty subsets of one unit's members with at most `max_items` rows that
 //!    pass every subset-level `require`, with its aggregates computed over the subset's rows.
 //!    A partial subset pruned by the sum target is never a candidate, nor is any subset it
@@ -416,21 +417,61 @@ pub(super) fn lower_tier(
         ),
     ]);
     if st.is_some() {
-        // positive and negative values of a unit's members up to each member (in member order)
-        // and in total; `idx` is unique within a unit, so the running sums are exact
+        // `pos{r}` (`neg{r}`), r = 1..max_items - 1: the largest (smallest) sum that at most r
+        // members after a member can add, i.e. the sum of the r largest positive (most negative)
+        // values after it, 0 when there are none. Such a set's first member j adds its own
+        // value's positive part and at most r - 1 members after j, so `pos{r}` is the largest
+        // `max(v_j, 0) + pos{r-1}_j` over the members j after it: a running maximum in reverse
+        // member order (from each member to the unit's last; `idx` is unique within a unit) taken
+        // from the next member. Each r reads the table of r - 1: DuckDB's planning time grows
+        // exponentially with the depth of nested window steps.
         let part = |op: BinaryOp| case(vec![(bin(op, c("v"), int(0)), c("v"))], Some(int(0)));
-        let sum = |op: BinaryOp, order: Vec<OrderKey>, name: &str| {
-            named(
-                win(WinFunc::Sum, Some(part(op)), vec![c("unit")], order, None),
-                name,
-            )
-        };
-        mem_plan = mem_plan.window(vec![
-            sum(BinaryOp::Gt, vec![asc(c("idx"))], "pos_upto"),
-            sum(BinaryOp::Gt, Vec::new(), "pos_tot"),
-            sum(BinaryOp::Lt, vec![asc(c("idx"))], "neg_upto"),
-            sum(BinaryOp::Lt, Vec::new(), "neg_tot"),
-        ]);
+        let reverse = vec![OrderKey {
+            expr: c("idx"),
+            desc: true,
+        }];
+        let mut cols = keep(&["unit", "id", "ex", "prior", "v", "tgt", "idx", "er"]);
+        for r in 1..k_max {
+            if r > 1 {
+                let table = p(&format!("mem{}", r - 1));
+                scratch.push(table.clone());
+                prepare.push(Op::Create {
+                    table: table.clone(),
+                    plan: mem_plan,
+                });
+                mem_plan = scan(&table);
+            }
+            let from = |func: WinFunc, op: BinaryOp, prev: &str| {
+                let step = if r == 1 {
+                    part(op)
+                } else {
+                    bin(BinaryOp::Add, part(op), c(&format!("{prev}{}", r - 1)))
+                };
+                win(func, Some(step), vec![c("unit")], reverse.clone(), None)
+            };
+            let next = |name: &str| {
+                let lead = win(
+                    WinFunc::Lead,
+                    Some(c(name)),
+                    vec![c("unit")],
+                    vec![asc(c("idx"))],
+                    None,
+                );
+                native("coalesce", vec![lead, int(0)])
+            };
+            let (pos_from, neg_from) = (format!("pos_from{r}"), format!("neg_from{r}"));
+            cols.extend([format!("pos{r}"), format!("neg{r}")].map(|x| named(c(&x), &x)));
+            mem_plan = mem_plan
+                .window(vec![
+                    named(from(WinFunc::Max, BinaryOp::Gt, "pos"), &pos_from),
+                    named(from(WinFunc::Min, BinaryOp::Lt, "neg"), &neg_from),
+                ])
+                .window(vec![
+                    named(next(&pos_from), &format!("pos{r}")),
+                    named(next(&neg_from), &format!("neg{r}")),
+                ])
+                .project(cols.clone());
+        }
     }
     prepare.push(Op::Create {
         table: mem.clone(),
@@ -450,22 +491,27 @@ pub(super) fn lower_tier(
     // representatives are built: a member that is not the first of its interchangeable rows
     // joins only right after the previous one, so of subsets that differ by exchanging
     // interchangeable rows only the one using the first rows in identity order is enumerated.
-    // With a sum target a subset with running sum `p` (`ps`) whose last member is `m` is kept
-    // only while the members after `m` can still bring it to the target: `p` plus their negative
-    // values is at most the target, and `p` plus their positive values at least the target. A
-    // subset that reaches the target keeps each of its prefixes, whatever the member order.
-    let reachable = |p: TExpr, m: fn(&str) -> TExpr| {
-        let after = |tot: &str, upto: &str| bin(BinaryOp::Sub, m(tot), m(upto));
+    // With a sum target a subset of k members with running sum `p` (`ps`) whose last member is
+    // `m` is kept only while the r = max_items - k members it may still gain, all after `m`, can
+    // bring it to the target: `p` plus the smallest sum they can add (`neg{r}`) is at most the
+    // target, and `p` plus the largest (`pos{r}`) at least the target; with no place left `p`
+    // must be the target. A subset that reaches the target keeps each of its prefixes, whatever
+    // the member order: the members it has after a prefix are no more than that prefix's places.
+    let reachable = |p: TExpr, m: fn(&str) -> TExpr, k: usize| {
+        let r = k_max - k;
+        if r == 0 {
+            return eq(p, m("tgt"));
+        }
         and(
             bin(
                 BinaryOp::Le,
-                bin(BinaryOp::Add, p.clone(), after("neg_tot", "neg_upto")),
+                bin(BinaryOp::Add, p.clone(), m(&format!("neg{r}"))),
                 m("tgt"),
             ),
             bin(
                 BinaryOp::Le,
                 m("tgt"),
-                bin(BinaryOp::Add, p, after("pos_tot", "pos_upto")),
+                bin(BinaryOp::Add, p, m(&format!("pos{r}"))),
             ),
         )
     };
@@ -477,7 +523,7 @@ pub(super) fn lower_tier(
     ];
     let mut first_filter = eq(c("er"), int(1));
     if st.is_some() {
-        first_filter = and(first_filter, reachable(c("v"), c));
+        first_filter = and(first_filter, reachable(c("v"), c, 1));
         first.push(named(c("v"), "ps"));
     }
     level_ops.push(Op::Create {
@@ -498,7 +544,7 @@ pub(super) fn lower_tier(
         ];
         if st.is_some() {
             let ps = bin(BinaryOp::Add, c("ps"), c1("v"));
-            on.push(reachable(ps.clone(), c1));
+            on.push(reachable(ps.clone(), c1, k));
             out.push(named(ps, "ps"));
         }
         level_ops.push(Op::Create {

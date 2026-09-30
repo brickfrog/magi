@@ -444,6 +444,17 @@ fn pruning_by_sum_keeps_every_candidate_with_mixed_signs_and_nulls() {
     assert_eq!(ambiguous, pairs("plain_null_ambiguous"));
 }
 
+#[test]
+fn pruning_by_sum_counts_the_places_a_subset_has_left() {
+    // each candidate needs all max_items places, and a2's needs two negative members last
+    let fx = Fixture::new("subset");
+    fx.run_ok("places.magi");
+    let pairs = |f: &str| sorted(fx.csv(&format!("out/{f}.csv")).project(&["a_id", "b_id"]));
+    let expected = lines!["a1,b1", "a1,b4", "a1,b5", "a2,n1", "a2,n3", "a2,n4"];
+    assert_eq!(pairs("pruned_matches"), expected);
+    assert_eq!(pairs("plain_matches"), expected);
+}
+
 // ---------------------------------------------------------------------------------------------
 // check
 

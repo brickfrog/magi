@@ -60,7 +60,10 @@ pub enum WinFunc {
     Rank,
     DenseRank,
     Count,
-    Sum,
+    Max,
+    Min,
+    /// The argument on the next row in window order (null on the last).
+    Lead,
 }
 
 #[derive(Debug, Clone, PartialEq)]

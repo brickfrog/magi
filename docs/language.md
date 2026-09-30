@@ -408,12 +408,13 @@ fits in it.
 
 With a subset-level `require` that contains `sum(x) == t` (alone or joined by `and`, `x` an int
 or decimal, `t` not read from the subset side), the run builds subsets one size at a time and
-extends a subset only while the members after its last one (their positive and negative values)
-can still bring its sum to `t`. No candidate is lost: a subset that reaches `t` keeps every
-smaller subset it grows from. Before each size the run adds the subsets that size examines to a
-total and stops (M315) as soon as the total exceeds `max_subsets`. `magi run` prints the counts
-per tier. For example, 25 card payouts (the largest with 20 candidate sales, `max_items 10`)
-examine 323,014 subsets and keep 86,305, where the upfront bound is 1,620,057.
+extends a subset of k rows only while at most `max_items` - k members after its last one (the
+largest positive or most negative of them) can still bring its sum to `t`. No candidate is lost:
+a subset that reaches `t` keeps every smaller subset it grows from. Before each size the run adds
+the subsets that size examines to a total and stops (M315) as soon as the total exceeds
+`max_subsets`. `magi run` prints the counts per tier. For example, 25 card payouts (the largest
+with 20 candidate sales, `max_items 10`) examine 322,475 subsets and keep 85,655, where the
+upfront bound is 1,620,057.
 
 Each `one_to_one` round costs a pass over the tier's candidates; data where every row's best
 candidate prefers someone else (a preference chain) needs one round per link. `magi run` prints

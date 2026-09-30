@@ -142,7 +142,9 @@ fn lower(e: &TExpr, a: &[Option<&str>; 2]) -> Expr {
                 WinFunc::Rank => "rank",
                 WinFunc::DenseRank => "dense_rank",
                 WinFunc::Count => "count",
-                WinFunc::Sum => "sum",
+                WinFunc::Max => "max",
+                WinFunc::Min => "min",
+                WinFunc::Lead => "lead",
             };
             let call = Expr::Func {
                 name: name.into(),

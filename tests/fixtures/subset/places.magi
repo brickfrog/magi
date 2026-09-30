@@ -1,0 +1,27 @@
+# Pruning by a sum target counts the places a subset has left (max_items 3; members in line
+# order). a1 = 25 = 1 + 8 + 16: after 1 only two places are left, and the two largest later
+# values bring it exactly to 25. a2 = 50 = 100 - 20 - 30: the two negative values come last and
+# are both needed. Each candidate sits on the bound, so pruning with one place too few loses it
+# (`pruned` must match `plain`, which has no sum target); with one place too many 32 subsets are
+# examined, more than `max_subsets` 25.
+source pa = csv("places_a.csv") { identity id }
+source pb = csv("places_b.csv") { identity id }
+
+reconcile pruned = pa as a with pb as b {
+    block by batch
+    tier sums {
+        subset b max_items 3 max_subsets 25
+        require sum(b.amount) == a.amount
+    }
+}
+
+reconcile plain = pa as a with pb as b {
+    block by batch
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) - a.amount == 0
+    }
+}
+
+export pruned.matches to "out/pruned_matches.csv"
+export plain.matches to "out/plain_matches.csv"

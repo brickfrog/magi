@@ -87,7 +87,9 @@ fn render(e: &TExpr, p: &[&str]) -> String {
                 WinFunc::Rank => "rank",
                 WinFunc::DenseRank => "dense_rank",
                 WinFunc::Count => "count",
-                WinFunc::Sum => "sum",
+                WinFunc::Max => "max",
+                WinFunc::Min => "min",
+                WinFunc::Lead => "lead",
             };
             let mut s = format!("{name}({})", arg.as_ref().map(|a| r(a)).unwrap_or_default());
             if let Some(f) = filter {
