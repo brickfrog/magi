@@ -278,6 +278,9 @@ fn call(name: &str, xs: &[TExpr], a: &[Option<&str>; 2], result: Type) -> Expr {
             otherwise: Some(Box::new(arg(2))),
         },
         "to_string" => cast(arg(0), "VARCHAR", false),
+        // one rule for every input: halves round away from zero (DuckDB casts decimals and text
+        // that way, but a DOUBLE to the nearest even integer)
+        "to_int" if xs[0].ty.ty == Type::Float => cast(func("round", vec![arg(0)]), "BIGINT", true),
         "to_int" => cast(arg(0), "BIGINT", true),
         "to_float" => cast(arg(0), "DOUBLE", true),
         "to_date" => cast(arg(0), "DATE", true),

@@ -1,0 +1,3 @@
+source spaces = csv("spaces.csv")
+
+export spaces to "out/spaces.csv"

@@ -59,10 +59,16 @@ unique and present (M211), so its columns are never null in the source relation.
 
 CSV column types come from every value, not a sample: plain decimals become `decimal`, only
 exponent notation becomes `float`; codes with leading zeros and integers beyond 64 bits stay
-text; booleans, dates, times and timestamps are inferred only when every value is one (dates
+text; booleans, dates, times and timestamps are inferred only when every value is one (`27:15`
+is no time and `2024-02-30` no date; dates
 not in ISO form stay text with a note naming the format to declare; times with more than 6
 decimal places of seconds stay text) (M201); a column DuckDB's sample showed as text or blanks
-still gets the type all its values share. A file that is not one table — lines with different
+still gets the type all its values share. Header names are those of the file, with runs of
+whitespace made one space; as in Excel, a blank header is named `column_<i>` and one that repeats
+an earlier name (ignoring case) `<name>_2`, `<name>_3`, ... (skipping names the header has
+elsewhere), each with a warning (M201). In a file read whole, a line of only delimiters, spaces
+and tabs (`,,,`) is a blank line, not a row of nulls, and rows are numbered without it; a line
+of only spaces or tabs stops the run (M212, naming it). A file that is not one table — lines with different
 numbers of fields (with or without `header: false`), or a delimiter DuckDB cannot find — is an
 error naming the lines (M212). File paths are literal: `*`, `?` and `[` are not patterns. Where
 MAGI itself splits lines into fields (sections, field counts in messages), it uses the declared
@@ -238,6 +244,8 @@ Operators: `+ - * / %`, `== != < <= > >=`, `and or not`, `x is [not] null`, `x [
 `days_between(a, b)` is the absolute number of days; `date_diff(a, b)` is signed (`b - a`).
 `parse_number` accepts `1,234.5` thousands separators and returns `decimal(38, 6)` (up to 32
 integer digits; more than 6 decimal places are rounded); anything else unreadable is null.
+`to_int` rounds halves away from zero whatever the input's type (`2.5` and `-2.5` become `3`
+and `-3`) and is null for text that is not a number.
 `missing(x)` is the fraction of rows where `x` is null or blank. `today()` makes results depend
 on the run date; `magi plan` says so and `--today YYYY-MM-DD` (accepted by `run`, `check`,
 `plan`, `sql`, `explain`, `schema`, `trace`) pins it. DuckDB-only scalar functions are available

@@ -17,7 +17,7 @@ pub mod fixed;
 pub mod odbc;
 pub mod staged;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::sql::{self, Expr, Query, Select, Stmt, TableRef, func, str_lit};
 use crate::semantic::hir::{
@@ -623,6 +623,85 @@ fn blank_null(raw: Expr) -> Expr {
     func("nullif", vec![trimmed(raw), str_lit("")])
 }
 
+/// Column names from a table's header cells (see [`header_names`]).
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct HeaderNames {
+    pub names: Vec<String>,
+    /// 0-based positions of blank header cells, named `column_<position + 1>`.
+    pub blank: Vec<usize>,
+    /// Headers that repeat an earlier name: position, position of the first use, and the name.
+    pub renamed: Vec<(usize, usize, String)>,
+}
+
+/// Names for the columns of a CSV or Excel table from its header cells: each with its runs of
+/// whitespace made one space, `column_<i>` (1-based) for a blank one, and `<name>_2`, `<name>_3`,
+/// ... for one that repeats an earlier name ignoring case. A generated name skips every name the
+/// header row has, so a real `amount_2` column keeps its name.
+pub(crate) fn header_names(cells: impl IntoIterator<Item = Option<String>>) -> HeaderNames {
+    let norm: Vec<String> = cells
+        .into_iter()
+        .map(|c| {
+            c.map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+                .unwrap_or_default()
+        })
+        .collect();
+    let reserved: HashSet<String> = norm
+        .iter()
+        .filter(|n| !n.is_empty())
+        .map(|n| n.to_lowercase())
+        .collect();
+    let mut out = HeaderNames::default();
+    // lower-case name, position of first use
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for (i, n) in norm.into_iter().enumerate() {
+        let base = if n.is_empty() {
+            out.blank.push(i);
+            format!("column_{}", i + 1)
+        } else {
+            n
+        };
+        let mut name = base.clone();
+        if let Some(&(_, first)) = seen.iter().find(|(s, _)| *s == base.to_lowercase()) {
+            let free = |c: &str| {
+                let c = c.to_lowercase();
+                !reserved.contains(&c) && !seen.iter().any(|(s, _)| *s == c)
+            };
+            let mut k = 2;
+            while !free(&format!("{base}_{k}")) {
+                k += 1;
+            }
+            name = format!("{base}_{k}");
+            out.renamed.push((i, first, base));
+        }
+        seen.push((name.to_lowercase(), i));
+        out.names.push(name);
+    }
+    out
+}
+
+/// The rows of `from` that are not blank lines: a line of only delimiters and ASCII whitespace
+/// (`,,,`, a spreadsheet's empty row) is not a data row, as DuckDB already skips empty lines,
+/// and rows are numbered after it is left out. A field holding other whitespace (a no-break
+/// space) is a blank value in a data row, as MAGI's own line scanner (`csv::records`) reads it.
+fn non_blank_rows(from: TableRef, columns: &[String]) -> TableRef {
+    let any_value = columns
+        .iter()
+        .map(|c| {
+            let text = func("coalesce", vec![sql::col(c), str_lit("")]);
+            Expr::Not(Box::new(func(
+                "regexp_full_match",
+                vec![text, str_lit("[ \\t\\n\\f\\r]*")],
+            )))
+        })
+        .reduce(|a, b| sql::bin("OR", a, b));
+    TableRef::Sub(Box::new(Query::select(Select {
+        items: vec![(Expr::Star { table: None }, None)],
+        from: Some((from, None)),
+        where_: any_value,
+        ..Select::default()
+    })))
+}
+
 fn cast(expr: Expr, ty: &str, try_: bool) -> Expr {
     Expr::Cast {
         expr: Box::new(expr),
@@ -954,7 +1033,10 @@ fn raw_load(
     Ok(match &src.kind {
         SourceKind::Csv { path, options } => RawLoad::Sql {
             create: vec![create_raw(filled(
-                with_row(csv::table(csv_read.unwrap_or(path), options, true, columns)),
+                with_row(non_blank_rows(
+                    csv::table(csv_read.unwrap_or(path), options, true, columns),
+                    columns,
+                )),
                 columns,
                 &options.fill_down,
             ))],

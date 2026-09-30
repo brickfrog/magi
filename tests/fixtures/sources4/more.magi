@@ -1,0 +1,17 @@
+source headers = csv("headers.csv")
+
+source blanks = csv("blanks.csv") { row_number: rn }
+
+source halves = csv("halves.csv") {
+    schema {
+        d: decimal(10, 2)
+        s: string
+        f: float
+    }
+}
+
+dataset ints = halves |> derive { i_d = to_int(d)  i_s = to_int(s)  i_f = to_int(f) }
+
+export headers to "out/headers.csv"
+export blanks to "out/blanks.csv"
+export ints to "out/ints.csv"

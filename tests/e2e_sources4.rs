@@ -96,3 +96,56 @@ fn fixed_width_blocks_and_raw_values() {
         out.stderr
     );
 }
+
+/// A blank header and one repeating another in any case are named as in Excel (`column_4`,
+/// `amount_3`) with a warning each; a real `amount_2` column keeps its name.
+#[test]
+fn csv_headers_are_named_like_excel_headers() {
+    let fx = Fixture::new("sources4");
+    let out = fx.run_ok("more.magi");
+    assert_eq!(
+        out.codes().iter().filter(|c| *c == "M201").count(),
+        2,
+        "{}",
+        out.stderr
+    );
+    assert_eq!(
+        fx.csv("out/headers.csv").header,
+        lines!["id", "Amount", "amount_3", "column_4", "amount_2"]
+    );
+    assert_eq!(
+        fx.csv("out/headers.csv").project(&["amount_3", "amount_2"]),
+        lines!["3,5"]
+    );
+}
+
+/// A line of only delimiters is a blank line, not a row of nulls, and rows are numbered without
+/// it; a line of only whitespace is named instead of being read as a one-field record.
+#[test]
+fn blank_lines_in_a_whole_file_are_not_rows() {
+    let fx = Fixture::new("sources4");
+    fx.run_ok("more.magi");
+    assert_eq!(
+        fx.csv("out/blanks.csv").project(&["id", "amt", "rn"]),
+        lines!["1,5,1", "2,6,2"]
+    );
+    let out = fx.check("spaces.magi");
+    out.assert_code(1).assert_diagnostic("M212");
+    assert!(
+        out.stderr_flat()
+            .contains("1 line holds only whitespace: line 3"),
+        "{}",
+        out.stderr
+    );
+}
+
+/// `to_int` rounds halves away from zero whatever the input's type.
+#[test]
+fn to_int_rounds_halves_the_same_way_for_every_type() {
+    let fx = Fixture::new("sources4");
+    fx.run_ok("more.magi");
+    assert_eq!(
+        fx.csv("out/ints.csv").project(&["i_d", "i_s", "i_f"]),
+        lines!["-3,-3,-3", "3,3,3"]
+    );
+}

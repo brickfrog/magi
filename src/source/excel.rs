@@ -1086,60 +1086,44 @@ impl TableReader<'_> {
         table
     }
 
-    /// Column names from the header row: normalized, blank ones generated, duplicates suffixed.
+    /// Column names from the header row ([`super::header_names`]), with a warning for each
+    /// generated or renamed name.
     fn header_names(&self, table: &mut StagedTable) -> Vec<String> {
         let Region { r0, c0, c1, .. } = self.region;
-        let mut names: Vec<String> = Vec::new();
-        let mut blank: Vec<(String, String)> = Vec::new();
-        let mut renamed: Vec<String> = Vec::new();
-        let mut seen: Vec<(String, u32)> = Vec::new(); // lowercase name, column of first use
-        for (i, col) in (c0..=c1).enumerate() {
-            let raw = match self.cell(r0, col) {
-                Cell::Error => None,
-                cell => cell.into_text(),
-            };
-            let norm = raw
-                .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
-                .unwrap_or_default();
-            let base = if norm.is_empty() {
-                let generated = format!("column_{}", i + 1);
-                blank.push((cell_ref(r0, col), generated.clone()));
-                generated
-            } else {
-                norm
-            };
-            let taken = |n: &str| seen.iter().any(|(s, _)| *s == n.to_lowercase());
-            let mut name = base.clone();
-            if let Some(&(_, first)) = seen.iter().find(|(s, _)| *s == base.to_lowercase()) {
-                let mut k = 2;
-                while taken(&format!("{base}_{k}")) {
-                    k += 1;
-                }
-                name = format!("{base}_{k}");
-                renamed.push(format!(
-                    "`{base}` at {} (first at {}) renamed `{name}`",
-                    cell_ref(r0, col),
-                    cell_ref(r0, first)
-                ));
-            }
-            seen.push((name.to_lowercase(), col));
-            names.push(name);
-        }
-        if !blank.is_empty() {
-            let refs: Vec<&str> = blank.iter().map(|(r, _)| r.as_str()).collect();
-            let generated: Vec<&str> = blank.iter().map(|(_, n)| n.as_str()).collect();
+        let named = super::header_names((c0..=c1).map(|col| match self.cell(r0, col) {
+            Cell::Error => None,
+            cell => cell.into_text(),
+        }));
+        let at = |i: usize| cell_ref(r0, c0 + i as u32);
+        if !named.blank.is_empty() {
+            let refs: Vec<String> = named.blank.iter().map(|&i| at(i)).collect();
+            let generated: Vec<&str> = named
+                .blank
+                .iter()
+                .map(|&i| named.names[i].as_str())
+                .collect();
             table.warn(format!(
                 "sheet `{}`: blank header {} {} named {}",
                 self.sheet,
-                if blank.len() == 1 { "cell" } else { "cells" },
+                if named.blank.len() == 1 {
+                    "cell"
+                } else {
+                    "cells"
+                },
                 refs.join(", "),
                 generated.join(", ")
             ));
         }
-        for r in renamed {
-            table.warn(format!("sheet `{}`: duplicate header {r}", self.sheet));
+        for (i, first, base) in &named.renamed {
+            table.warn(format!(
+                "sheet `{}`: duplicate header `{base}` at {} (first at {}) renamed `{}`",
+                self.sheet,
+                at(*i),
+                at(*first),
+                named.names[*i]
+            ));
         }
-        names
+        named.names
     }
 
     /// Warns about merged ranges overlapping the table: only their first cell holds the value,
@@ -1650,12 +1634,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "Order Id",
-                "column_2",
-                "amount",
-                "AMOUNT_2",
-                "amount_2_2",
-                "when"
+                "Order Id", "column_2", "amount", "AMOUNT_3", "amount_2", "when"
             ]
         );
         let types: Vec<Type> = t.columns.iter().map(|c| c.inferred).collect();
@@ -1682,7 +1661,7 @@ mod tests {
         );
         assert!(
             w.iter()
-                .any(|m| m.contains("`AMOUNT` at D1 (first at C1) renamed `AMOUNT_2`")),
+                .any(|m| m.contains("`AMOUNT` at D1 (first at C1) renamed `AMOUNT_3`")),
             "{w:#?}"
         );
         let mixed = w.iter().find(|m| m.starts_with("column when:")).unwrap();

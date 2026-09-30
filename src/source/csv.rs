@@ -54,12 +54,12 @@ const ISO_TIMESTAMP_TZ: &str =
 const ISO_TIME: &str = r"\d{2}:\d{2}(:\d{2}(\.\d+)?)?";
 
 /// `read_csv(path, header = .., delim = .., all_varchar = ..)` with the user's options. `path` is
-/// the file DuckDB reads (see [`CsvFile`]). `columns` are the source's columns: a file without a
-/// header gets them as DuckDB's `names` (see [`headerless_names`]); empty leaves DuckDB's own.
+/// the file DuckDB reads (see [`CsvFile`]). `columns` are the source's columns, in file order,
+/// given to DuckDB as `names`: MAGI names them (see [`headerless_names`] and [`header_names`]);
+/// empty leaves DuckDB's own.
 pub fn table(path: &Path, options: &CsvOptions, all_varchar: bool, columns: &[String]) -> TableRef {
     let mut t = table_fn("read_csv", path, options, all_varchar);
-    if !options.header
-        && !columns.is_empty()
+    if !columns.is_empty()
         && let TableRef::Func { named, .. } = &mut t
     {
         named.push((
@@ -73,6 +73,67 @@ pub fn table(path: &Path, options: &CsvOptions, all_varchar: bool, columns: &[St
 /// Column names of a CSV file without a header, as for Excel: `column_1` .. `column_<n>`.
 fn headerless_names(n: usize) -> Vec<String> {
     (1..=n).map(|i| format!("column_{i}")).collect()
+}
+
+/// Column names of a CSV file with a header, as for Excel ([`super::header_names`]), with a
+/// warning for each generated or renamed name. The header is read by DuckDB as the first row of
+/// the file, so quoting applies.
+fn header_names(
+    conn: &duckdb::Connection,
+    path: &Path,
+    options: &CsvOptions,
+    delim: u8,
+    n: usize,
+) -> Result<(Vec<String>, Vec<SourceNote>), String> {
+    let raw = CsvOptions {
+        header: false,
+        delimiter: Some((delim as char).to_string()),
+        ..options.clone()
+    };
+    let q = format!(
+        "{} LIMIT 1",
+        select_star(table_fn("read_csv", path, &raw, true))
+    );
+    let fields: Vec<Option<String>> = conn
+        .query_row(&q, [], |r| (0..n).map(|i| r.get(i)).collect())
+        .map_err(|e| e.to_string())?;
+    let named = super::header_names(fields);
+    let mut renamed: Vec<String> = Vec::new();
+    for (i, first, base) in &named.renamed {
+        renamed.push(format!(
+            "duplicate header `{base}` in column {} (first in column {}) renamed `{}`",
+            i + 1,
+            first + 1,
+            named.names[*i]
+        ));
+    }
+    let blank: Vec<(usize, &str)> = named
+        .blank
+        .iter()
+        .map(|&i| (i + 1, named.names[i].as_str()))
+        .collect();
+    let mut notes = Vec::new();
+    let warn = |message: String| SourceNote {
+        level: NoteLevel::Warning,
+        message,
+        type_hint_for: None,
+    };
+    if !blank.is_empty() {
+        let columns: Vec<String> = blank.iter().map(|(c, _)| c.to_string()).collect();
+        let generated: Vec<&str> = blank.iter().map(|(_, n)| *n).collect();
+        notes.push(warn(format!(
+            "blank header in {} {} named {}",
+            if blank.len() == 1 {
+                "column"
+            } else {
+                "columns"
+            },
+            columns.join(", "),
+            generated.join(", ")
+        )));
+    }
+    notes.extend(renamed.into_iter().map(warn));
+    Ok((named.names, notes))
 }
 
 /// The reader call with the user's options. The quote character is always `"` and no line is a
@@ -183,7 +244,9 @@ pub fn infer(
         && let [(name, _)] = columns.as_slice()
         && name.contains([',', ';', '|', '\t'])
     {
-        if let Some(e) = stray_quote_error(file, guessed) {
+        if let Some(e) =
+            stray_quote_error(file, guessed).or_else(|| spaced_lines_error(file, guessed))
+        {
             return Err(e);
         }
         // lines the guessed delimiter splits differently are the likelier cause
@@ -208,13 +271,17 @@ pub fn infer(
     {
         return Err(shape_error(file, options, delim, &reason));
     }
-    // without a header, columns are named `column_1`.. like Excel's, and every later read (and
-    // staging) passes those names to DuckDB
-    if !options.header {
-        let given = headerless_names(columns.len());
-        for ((name, _), given) in columns.iter_mut().zip(given) {
-            *name = given;
-        }
+    // columns are named like Excel's: `column_1`.. without a header; with one, blank headers get
+    // that name and repeated ones (ignoring case) `_2`, `_3`, ... Every later read (and staging)
+    // passes these names to DuckDB, whose own would be `column0` and `amount_1`.
+    let (given, mut notes) = if options.header {
+        header_names(conn, read, options, delim, columns.len())
+            .map_err(|e| read_error(file, options, &e))?
+    } else {
+        (headerless_names(columns.len()), Vec::new())
+    };
+    for ((name, _), given) in columns.iter_mut().zip(given) {
+        *name = given;
     }
     let names: Vec<String> = columns.iter().map(|(n, _)| n.clone()).collect();
     let probes: Vec<Probe> = columns
@@ -223,7 +290,6 @@ pub fn infer(
         .collect();
     let counts =
         scan(conn, read, options, &names, &probes).map_err(|e| read_error(file, options, &e))?;
-    let mut notes = Vec::new();
     for (probe, c) in probes.iter().zip(&counts) {
         let (ty, finding) = probe.settle(c, &sniffed);
         if let Some(f) = finding.filter(|_| probe.declared.is_none() && probe.kind != Kind::Text) {
@@ -1068,7 +1134,7 @@ fn shape_error(file: &CsvFile, options: &CsvOptions, delim: u8, reason: &str) ->
 /// of DuckDB's message (which names the problem and a line number).
 fn read_error(file: &CsvFile, options: &CsvOptions, error: &str) -> SourceError {
     let delim = delimiter(file.path(), options);
-    if let Some(e) = stray_quote_error(file, delim) {
+    if let Some(e) = stray_quote_error(file, delim).or_else(|| spaced_lines_error(file, delim)) {
         return e;
     }
     if let Ok(r) = ragged(file.path(), delim)
@@ -1096,6 +1162,42 @@ fn read_error(file: &CsvFile, options: &CsvOptions, error: &str) -> SourceError 
 /// First line of a DuckDB error; the rest may quote file contents.
 pub fn first_line(error: &str) -> String {
     error.lines().next().unwrap_or_default().trim().to_string()
+}
+
+/// The M212 error for lines holding only whitespace (`   `) in a file read whole: DuckDB reads
+/// such a line as a record of one field, while an empty line is skipped. `None` when there is
+/// none (a `section:` never holds one: blank lines end sections).
+fn spaced_lines_error(file: &CsvFile, delim: u8) -> Option<SourceError> {
+    let (mut lines, mut total) = (Vec::new(), 0u64);
+    records(file.path(), delim, |l| {
+        if let Line::Blank {
+            line, spaced: true, ..
+        } = l
+        {
+            total += 1;
+            if lines.len() < MAX_LINES_LISTED {
+                lines.push(file.line(line).to_string());
+            }
+        }
+    })
+    .ok()?;
+    if total == 0 {
+        return None;
+    }
+    Some(SourceError {
+        code: SHAPE_ERROR,
+        message: format!(
+            "could not read `{}` as a table: {} only whitespace: {} {}{}",
+            file_name(&file.source),
+            if total == 1 { "1 line holds" } else { "lines hold" },
+            if total == 1 { "line" } else { "lines" },
+            lines.join(", "),
+            if total > lines.len() as u64 { ", ..." } else { "" }
+        ),
+        help: Some(
+            "empty the line (an empty line is skipped) or remove it, or read the part of the file you need with `section:`".into(),
+        ),
+    })
 }
 
 /// The M212 error for a quoted field whose closing `"` is followed by more text before the next
@@ -1310,13 +1412,18 @@ enum Line {
         empty: bool,
         ending: Option<Break>,
     },
-    /// A line holding only whitespace, outside a quoted field, and its line break.
-    Blank { ending: Break },
+    /// A line holding only whitespace, outside a quoted field: its number, whether it holds any
+    /// whitespace (`   `, which DuckDB reads as a record, not an empty line), and its line break.
+    Blank {
+        line: u64,
+        spaced: bool,
+        ending: Break,
+    },
 }
 
 /// A line that has ended: where its record starts (`None`: a blank line), its last line, number
-/// of fields, end byte, and whether it holds a value.
-type Ended = (Option<(u64, u64)>, u64, usize, u64, bool);
+/// of fields, end byte, whether it holds a value, and whether it holds whitespace.
+type Ended = (Option<(u64, u64)>, u64, usize, u64, bool, bool);
 
 /// One pass over a CSV file with DuckDB's quoting and line breaks (see [`Quoting`]), reporting
 /// each record and each blank line in file order. Line numbers are 1-based; a UTF-8 byte order
@@ -1339,23 +1446,26 @@ fn records_in(
         (line_start, pos) = (3, 3);
     }
     let mut q = Quoting::new(backslash);
-    let (mut fields, mut value, mut prev) = (1usize, false, 0u8);
+    let (mut fields, mut value, mut spaced, mut prev) = (1usize, false, false, 0u8);
     // line and byte where the current record starts; `None` while a line holds only whitespace
     let mut start: Option<(u64, u64)> = None;
     // a line ended by `\r`: reported once the next byte shows whether the break is CRLF
     let mut pending: Option<Ended> = None;
-    let event = |(start, line, fields, end, value): Ended, ending: Option<Break>| match start {
-        Some((first, from)) => Line::Record {
-            lines: (first, line),
-            fields,
-            bytes: (from, end),
-            empty: !value,
-            ending,
-        },
-        None => Line::Blank {
-            ending: ending.unwrap_or(Break::Lf),
-        },
-    };
+    let event =
+        |(start, line, fields, end, value, spaced): Ended, ending: Option<Break>| match start {
+            Some((first, from)) => Line::Record {
+                lines: (first, line),
+                fields,
+                bytes: (from, end),
+                empty: !value,
+                ending,
+            },
+            None => Line::Blank {
+                line,
+                spaced,
+                ending: ending.unwrap_or(Break::Lf),
+            },
+        };
     loop {
         let buf = reader.fill_buf()?;
         if buf.is_empty() {
@@ -1365,8 +1475,8 @@ fn records_in(
             let kind = q.feed(b, delim);
             if let Some(ended) = pending.take() {
                 if kind == Byte::BreakTail {
-                    let (s, l, f, _, v) = ended;
-                    on(event((s, l, f, pos + 1, v), Some(Break::CrLf)));
+                    let (s, l, f, _, v, sp) = ended;
+                    on(event((s, l, f, pos + 1, v, sp), Some(Break::CrLf)));
                     line_start = pos + 1;
                 } else {
                     on(event(ended, Some(Break::Cr)));
@@ -1374,17 +1484,18 @@ fn records_in(
             }
             match kind {
                 Byte::Newline => {
-                    let ended = (start.take(), line, fields, pos + 1, value);
+                    let ended = (start.take(), line, fields, pos + 1, value, spaced);
                     if b == b'\r' {
                         pending = Some(ended);
                     } else {
                         on(event(ended, Some(Break::Lf)));
                     }
-                    (fields, value) = (1, false);
+                    (fields, value, spaced) = (1, false, false);
                     line += 1;
                     line_start = pos + 1;
                 }
-                Byte::BreakTail | Byte::Space => {}
+                Byte::Space => spaced = true,
+                Byte::BreakTail => {}
                 Byte::Delimiter => {
                     fields += 1;
                     start.get_or_insert((line, line_start));
@@ -1410,7 +1521,7 @@ fn records_in(
         on(event(ended, Some(Break::Cr)));
     }
     if start.is_some() {
-        on(event((start, line, fields, pos, value), None));
+        on(event((start, line, fields, pos, value, spaced), None));
     }
     Ok(q.saw_backslash_quote)
 }
@@ -1452,7 +1563,7 @@ fn line_endings(path: &Path, delim: u8) -> std::io::Result<Endings> {
             Line::Record {
                 ending: Some(e), ..
             }
-            | Line::Blank { ending: e } => e,
+            | Line::Blank { ending: e, .. } => e,
             Line::Record { ending: None, .. } => return,
         };
         match ending {
