@@ -1024,17 +1024,24 @@ fn lower_tier(
                     plan,
                 });
             }
-            // per group and side: remaining members, whether they are all exact duplicates of
-            // each other, and the first of them
+            // per group and side: remaining members, the members no earlier tier matched, whether
+            // those are all exact duplicates of each other, and the first member (unmatched ones
+            // come first). Members an earlier tier matched pair last and are never leftovers, so
+            // they neither need to be duplicates nor make the choice arbitrary.
             let side_summary = |t: &str, side: &str| {
+                let unseen = |e: TExpr| case(vec![(not(c("seen")), e)], None);
                 scan(t).aggregate(
                     vec![named(c("grp"), "grp")],
                     vec![
                         named(agg(AggFunc::Count, None), &format!("n{side}")),
                         named(
+                            agg(AggFunc::Count, Some(unseen(int(1)))),
+                            &format!("u{side}"),
+                        ),
+                        named(
                             eq(
-                                agg(AggFunc::Min, Some(c("exact"))),
-                                agg(AggFunc::Max, Some(c("exact"))),
+                                agg(AggFunc::Min, Some(unseen(c("exact")))),
+                                agg(AggFunc::Max, Some(unseen(c("exact")))),
                             ),
                             &format!("{side}_exact"),
                         ),
@@ -1049,9 +1056,16 @@ fn lower_tier(
                     ],
                 )
             };
-            // A group is decided when both sides have as many members, or the larger side's
-            // members are exact duplicates. An undecided pair is ambiguous at once; an undecided
-            // star is left to the tie step.
+            // A group is decided when both sides have as many members, or every leftover of the
+            // larger side is a member an earlier tier matched or an exact duplicate of its first
+            // member. An undecided pair is ambiguous at once; an undecided star is left to the tie
+            // step.
+            let decided = |n_self: &str, u_self: &str, exact: &str, n_other: &str| {
+                and(
+                    bin(BinaryOp::Gt, c(n_self), c(n_other)),
+                    or(bin(BinaryOp::Le, c(u_self), c(n_other)), c(exact)),
+                )
+            };
             let pairs_plan = scan(&mutual)
                 .project(keep(&["grp", "star"]))
                 .distinct()
@@ -1059,15 +1073,19 @@ fn lower_tier(
                     side_summary(&rma, "a"),
                     JoinType::Inner,
                     Some(eq(c("grp"), c1("grp"))),
-                    [keep(&["grp", "star"]), keep1(&["na", "a_exact", "a_first"])].concat(),
+                    [
+                        keep(&["grp", "star"]),
+                        keep1(&["na", "ua", "a_exact", "a_first"]),
+                    ]
+                    .concat(),
                 )
                 .join(
                     side_summary(&rmb, "b"),
                     JoinType::Inner,
                     Some(eq(c("grp"), c1("grp"))),
                     [
-                        keep(&["grp", "star", "na", "a_exact", "a_first"]),
-                        keep1(&["nb", "b_exact", "b_first"]),
+                        keep(&["grp", "star", "na", "ua", "a_exact", "a_first"]),
+                        keep1(&["nb", "ub", "b_exact", "b_first"]),
                     ]
                     .concat(),
                 )
@@ -1082,8 +1100,8 @@ fn lower_tier(
                         or(
                             eq(c("na"), c("nb")),
                             or(
-                                and(bin(BinaryOp::Gt, c("na"), c("nb")), c("a_exact")),
-                                and(bin(BinaryOp::Gt, c("nb"), c("na")), c("b_exact")),
+                                decided("na", "ua", "a_exact", "nb"),
+                                decided("nb", "ub", "b_exact", "na"),
                             ),
                         ),
                         "ok",

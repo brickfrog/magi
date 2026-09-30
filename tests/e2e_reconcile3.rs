@@ -385,6 +385,30 @@ fn unmatched_exact_duplicate_is_chosen_before_an_already_matched_one() {
     }
 }
 
+/// A row an earlier tier matched is paired last in its class and is never a leftover, even when
+/// it differs from the unmatched row in a column the tier reads only inside aggregates: the
+/// unmatched row is chosen instead of the class pair being ambiguous (on either side).
+#[test]
+fn already_matched_distinguishable_row_does_not_make_a_class_ambiguous() {
+    let fx = Fixture::new("reconcile3");
+    fx.run_ok("seen.magi");
+    let pairs = |rec: &str| {
+        let mut rows = fx
+            .csv(&format!("out/{rec}.csv"))
+            .project(&["tier", "a_id", "b_id"]);
+        rows.sort();
+        rows
+    };
+    assert_eq!(pairs("keep_a"), lines!["bykey,a2,b1", "sums,a1,b0"]);
+    assert_eq!(
+        pairs("keep_b"),
+        lines!["bykey,a2,b3", "sums,a1,b1", "sums,a1,b2"]
+    );
+    for rec in ["keep_a_ambiguous", "keep_b_ambiguous"] {
+        assert!(fx.csv(&format!("out/{rec}.csv")).rows.is_empty(), "{rec}");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // M305: `block by none` is a deliberate choice
 

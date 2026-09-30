@@ -1,5 +1,6 @@
 ---
 source: tests/e2e.rs
+assertion_line: 1161
 expression: fx.normalize(&out.stdout)
 ---
 -- reconcile pair: setup
@@ -313,7 +314,11 @@ WITH "__magi_step_1" AS (
   FROM "__magi_step_1"
 ),
 "__magi_step_3" AS (
-  SELECT "grp", count(*) AS "na", min("exact") = max("exact") AS "a_exact", min(CASE WHEN "rn" = 1 THEN "unit" END) AS "a_first"
+  SELECT "grp",
+         count(*) AS "na",
+         count(CASE WHEN NOT "seen" THEN 1 END) AS "ua",
+         min(CASE WHEN NOT "seen" THEN "exact" END) = max(CASE WHEN NOT "seen" THEN "exact" END) AS "a_exact",
+         min(CASE WHEN "rn" = 1 THEN "unit" END) AS "a_first"
   FROM "__magi_rc_pair_t1_rma"
   GROUP BY 1
 ),
@@ -321,13 +326,18 @@ WITH "__magi_step_1" AS (
   SELECT "l"."grp",
          "l"."star",
          "r"."na",
+         "r"."ua",
          "r"."a_exact",
          "r"."a_first"
   FROM "__magi_step_2" AS "l"
   JOIN "__magi_step_3" AS "r" ON "l"."grp" = "r"."grp"
 ),
 "__magi_step_5" AS (
-  SELECT "grp", count(*) AS "nb", min("exact") = max("exact") AS "b_exact", min(CASE WHEN "rn" = 1 THEN "unit" END) AS "b_first"
+  SELECT "grp",
+         count(*) AS "nb",
+         count(CASE WHEN NOT "seen" THEN 1 END) AS "ub",
+         min(CASE WHEN NOT "seen" THEN "exact" END) = max(CASE WHEN NOT "seen" THEN "exact" END) AS "b_exact",
+         min(CASE WHEN "rn" = 1 THEN "unit" END) AS "b_first"
   FROM "__magi_rc_pair_t1_rmb"
   GROUP BY 1
 ),
@@ -335,9 +345,11 @@ WITH "__magi_step_1" AS (
   SELECT "l"."grp",
          "l"."star",
          "l"."na",
+         "l"."ua",
          "l"."a_exact",
          "l"."a_first",
          "r"."nb",
+         "r"."ub",
          "r"."b_exact",
          "r"."b_first"
   FROM "__magi_step_4" AS "l"
@@ -350,7 +362,7 @@ WITH "__magi_step_1" AS (
          "nb",
          "a_first",
          "b_first",
-         "na" = "nb" OR ("na" > "nb" AND "a_exact" OR "nb" > "na" AND "b_exact") AS "ok"
+         "na" = "nb" OR ("na" > "nb" AND ("ua" <= "nb" OR "a_exact") OR "nb" > "na" AND ("ub" <= "na" OR "b_exact")) AS "ok"
   FROM "__magi_step_6"
 )
 SELECT *

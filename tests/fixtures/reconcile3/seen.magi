@@ -1,0 +1,33 @@
+# On a side that is not consumed, a row an earlier tier matched is paired last and is never a
+# leftover: the unmatched row of its class is chosen instead of the class being ambiguous.
+source sa = csv("seen_a.csv") { identity id }
+source sb = csv("seen_b.csv") { identity id }
+source ta = csv("seen2_a.csv") { identity id }
+source tb = csv("seen2_b.csv") { identity id }
+
+# a1 matches b0 by amount; b1 then has a1 (matched) and a2 (not) in one class
+reconcile keep_a = sa as a with sb as b {
+    block by none
+    consume b
+    tier sums {
+        subset a max_items 1
+        require sum(a.amt) == b.amt
+    }
+    tier bykey { require a.k == b.k }
+}
+
+# a1 matches b1 + b2; a2 then has b1, b2 (matched) and b3 (not) in one class
+reconcile keep_b = ta as a with tb as b {
+    block by none
+    consume a
+    tier sums {
+        subset b max_items 2
+        require sum(b.amt) == a.amt
+    }
+    tier bykey { require a.k == b.k }
+}
+
+export keep_a.matches to "out/keep_a.csv"
+export keep_b.matches to "out/keep_b.csv"
+export keep_a.ambiguous to "out/keep_a_ambiguous.csv"
+export keep_b.ambiguous to "out/keep_b_ambiguous.csv"
