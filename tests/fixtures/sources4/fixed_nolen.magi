@@ -1,0 +1,3 @@
+source blocks = fixed_width("blocks.txt") { layout: "layout.csv" }
+
+export blocks to "out/blocks.csv"

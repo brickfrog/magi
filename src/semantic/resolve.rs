@@ -997,6 +997,7 @@ impl<'a> Analyzer<'a> {
                     return false;
                 };
                 let (mut layout, mut encoding, mut record) = (None, None, None);
+                let mut record_length = None;
                 for o in &d.options {
                     match o.key.name.as_str() {
                         "layout" => layout = self.opt_str(o).map(|p| base.join(p)),
@@ -1014,11 +1015,35 @@ impl<'a> Analyzer<'a> {
                             }
                         }
                         "record" => record = self.opt_str(o),
+                        "record_length" => {
+                            let v = self.opt_int(o);
+                            match v.and_then(|v| usize::try_from(v).ok()).filter(|&n| n >= 1) {
+                                Some(n) => record_length = Some(n),
+                                None if v.is_some() => {
+                                    self.err(
+                                        Diagnostic::error(
+                                            "M007",
+                                            "`record_length` is a number of bytes, at least 1",
+                                        )
+                                        .label(o.value.span, "expected e.g. `record_length: 227`"),
+                                    );
+                                    return false;
+                                }
+                                None => return false,
+                            }
+                        }
                         "fill_down" => fill_down = self.opt_columns(o),
                         "row_number" => row_number = self.opt_column(o),
                         _ => self.unknown_option(
                             o,
-                            &["layout", "encoding", "record", "fill_down", "row_number"],
+                            &[
+                                "layout",
+                                "encoding",
+                                "record",
+                                "record_length",
+                                "fill_down",
+                                "row_number",
+                            ],
                             "a fixed_width source",
                         ),
                     }
@@ -1039,6 +1064,7 @@ impl<'a> Analyzer<'a> {
                         layout,
                         encoding,
                         record,
+                        record_length,
                         fill_down: fill_down.iter().map(|(n, _)| n.clone()).collect(),
                         row_number: row_number.as_ref().map(|(n, _)| n.clone()),
                     },

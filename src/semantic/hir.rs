@@ -642,6 +642,17 @@ pub struct Source {
     pub span: Span,
 }
 
+impl Source {
+    /// The declared column called `name`, ignoring ASCII case (a declaration may spell a
+    /// column of the file in another case).
+    pub fn declared_column(&self, name: &str) -> Option<&DeclaredColumn> {
+        self.declared
+            .as_ref()?
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Materialization {
     Table,

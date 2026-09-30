@@ -115,7 +115,13 @@ impl Reader {
         if !self.extracted.contains_key(&src.name) {
             let table = match &src.kind {
                 SourceKind::Excel { path, options } => excel::read_excel(path, options)?,
-                SourceKind::FixedWidth { path, options } => fixed::read_fixed(path, options)?,
+                SourceKind::FixedWidth { path, options } => {
+                    let as_text = |f: &str| {
+                        src.declared_column(f)
+                            .is_some_and(|c| c.ty.ty == crate::semantic::types::Type::String)
+                    };
+                    fixed::read_fixed(path, options, &as_text)?
+                }
                 SourceKind::Sql { connection, query } => match &find(connections, connection)?.kind
                 {
                     ConnectionKind::Odbc { .. } => {
@@ -469,12 +475,7 @@ impl SchemaProvider for Reader {
         src: &Source,
         connections: &[Connection],
     ) -> Result<Option<InferredSchema>, SourceError> {
-        let declared = |name: &str| {
-            src.declared
-                .as_ref()
-                .and_then(|d| d.iter().find(|c| c.name == name))
-                .map(|c| c.ty.ty)
-        };
+        let declared = |name: &str| src.declared_column(name).map(|c| c.ty.ty);
         let columns = match &src.kind {
             SourceKind::Csv { path, options } => {
                 missing_file(path)?;
@@ -661,8 +662,18 @@ fn cast_text(raw: Expr, ty: Type, formats: &[String]) -> Expr {
         )
     };
     let whole_micros = |value: Expr| unless(matches(SUB_MICROSECOND), value);
-    // `TRY_CAST(x AS DATE)` also accepts `2026-01-05 13:45`, dropping the time
-    let iso_date = cast(strptime(str_lit("%Y-%m-%d")), "DATE", false);
+    // `TRY_CAST(x AS DATE)` also accepts `2026-01-05 13:45`, dropping the time: a date is ISO date
+    // text, or ISO timestamp text whose time is midnight (`2026-01-05 00:00:00`)
+    let iso_date = {
+        let day = cast(strptime(str_lit("%Y-%m-%d")), "DATE", false);
+        let ts = zoneless("TIMESTAMP");
+        let ts_day = cast(ts.clone(), "DATE", false);
+        let midnight = Expr::Case {
+            whens: vec![(sql::bin("=", ts_day.clone(), ts), ts_day)],
+            otherwise: None,
+        };
+        func("coalesce", vec![day, midnight])
+    };
     // Declared formats never replace ISO text: Excel date and time cells arrive as ISO text and
     // may share a column with text cells in the declared format. The declared formats are tried
     // first, so one that reads ISO text differently (`%Y-%d-%m`) decides such values.
@@ -982,11 +993,7 @@ struct Typing {
 fn typing(src: &Source, rel: &Relation, raw_type: &dyn Fn(&str) -> Type, text: bool) -> Typing {
     let raw = raw_name(&src.name);
     let typed = typed_name(&src.name);
-    let declared = |name: &str| {
-        src.declared
-            .as_ref()
-            .and_then(|d| d.iter().find(|c| c.name == name))
-    };
+    let declared = |name: &str| src.declared_column(name);
     let mut typed_items = vec![(sql::col(ROW), Some(ROW.to_string()))];
     let mut reject_parts = Vec::new();
     let mut rounding = Vec::new();
@@ -1348,11 +1355,7 @@ pub fn stage(
     // typed relation (with source row numbers for the null checks)
     exec(&t.typed)?;
     let typed = typed_name(&src.name);
-    let declared = |name: &str| {
-        src.declared
-            .as_ref()
-            .and_then(|d| d.iter().find(|c| c.name == name))
-    };
+    let declared = |name: &str| src.declared_column(name);
     for col in &rel.columns {
         if declared(&col.name).is_some_and(|d| !d.ty.nullable) {
             let (n, first) = count_rows(

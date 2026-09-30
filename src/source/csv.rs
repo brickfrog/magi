@@ -75,11 +75,19 @@ fn headerless_names(n: usize) -> Vec<String> {
     (1..=n).map(|i| format!("column_{i}")).collect()
 }
 
+/// The reader call with the user's options. The quote character is always `"` and no line is a
+/// comment: DuckDB's sniffer would otherwise choose them from a sample, so one malformed line
+/// could switch quoting off for the whole file, `'` could become a quote, and data lines starting
+/// with `#` (`#N/A`) could be dropped as comments. The escape (`"` or `\`) is still sniffed.
 fn table_fn(name: &str, path: &Path, options: &CsvOptions, all_varchar: bool) -> TableRef {
-    let mut named = vec![(
-        "header".to_string(),
-        Expr::Lit(sql::Lit::Bool(options.header)),
-    )];
+    let mut named = vec![
+        (
+            "header".to_string(),
+            Expr::Lit(sql::Lit::Bool(options.header)),
+        ),
+        ("quote".into(), str_lit("\"")),
+        ("comment".into(), str_lit("")),
+    ];
     if let Some(d) = &options.delimiter {
         named.push(("delim".into(), str_lit(d)));
     }
@@ -175,6 +183,9 @@ pub fn infer(
         && let [(name, _)] = columns.as_slice()
         && name.contains([',', ';', '|', '\t'])
     {
+        if let Some(e) = stray_quote_error(file, guessed) {
+            return Err(e);
+        }
         // lines the guessed delimiter splits differently are the likelier cause
         let reason = match ragged(read, guessed) {
             Ok(r) if r.total > 0 => "lines differ in their number of fields".to_string(),
@@ -586,14 +597,27 @@ impl Probe {
         }
     }
 
+    /// Condition on value `v` that holds unless it is ISO text of `ty` that is also a value of
+    /// `ty`: `27:15` looks like a time and `2024-02-30` like a date, but neither is one.
+    fn not_iso(v: &str, ty: Type) -> String {
+        let sql_type = match ty {
+            Type::Date => "DATE",
+            Type::Timestamp => "TIMESTAMP",
+            Type::Time => "TIME",
+            _ => "TIMESTAMPTZ",
+        };
+        format!(
+            "NOT (regexp_full_match({v}, '{}') AND TRY_CAST({v} AS {sql_type}) IS NOT NULL)",
+            Self::iso(ty)
+        )
+    }
+
     /// Condition on the column's value that holds for the rows a finding is about (`None`: no
     /// single row shows it).
     fn condition(&self, finding: &Finding) -> Option<String> {
         let (v, plain) = (self.value(), self.plain());
         Some(match finding {
-            Finding::NotIso { .. } => {
-                format!("NOT regexp_full_match({v}, '{}')", Self::iso(self.sniffed))
-            }
+            Finding::NotIso { .. } => Self::not_iso(&v, self.sniffed),
             Finding::SubMicrosecond(_) => format!("regexp_matches({v}, '{SUB_MICROSECOND}')"),
             Finding::NotBool(_) => {
                 let words: Vec<String> = TRUE_TEXT
@@ -630,10 +654,7 @@ impl Probe {
                 out.push(format!("count({v})"));
                 out.push(count(Finding::NotBool(0)));
                 for ty in [Type::Date, Type::Timestamp, Type::TimestampTz, Type::Time] {
-                    out.push(count_where(format!(
-                        "NOT regexp_full_match({v}, '{}')",
-                        Self::iso(ty)
-                    )));
+                    out.push(count_where(Self::not_iso(&v, ty)));
                 }
                 out.push(count(Finding::SubMicrosecond(0)));
                 out
@@ -1047,6 +1068,9 @@ fn shape_error(file: &CsvFile, options: &CsvOptions, delim: u8, reason: &str) ->
 /// of DuckDB's message (which names the problem and a line number).
 fn read_error(file: &CsvFile, options: &CsvOptions, error: &str) -> SourceError {
     let delim = delimiter(file.path(), options);
+    if let Some(e) = stray_quote_error(file, delim) {
+        return e;
+    }
     if let Ok(r) = ragged(file.path(), delim)
         && let Some(reason) = misshapen(&r, options, None, file)
     {
@@ -1072,6 +1096,53 @@ fn read_error(file: &CsvFile, options: &CsvOptions, error: &str) -> SourceError 
 /// First line of a DuckDB error; the rest may quote file contents.
 pub fn first_line(error: &str) -> String {
     error.lines().next().unwrap_or_default().trim().to_string()
+}
+
+/// The M212 error for a quoted field whose closing `"` is followed by more text before the next
+/// delimiter (`"12"" pipe"x`), which CSV readers split in different ways, when neither `""` nor
+/// `\"` escapes explain it; `None` when the file has no such field.
+fn stray_quote_error(file: &CsvFile, delim: u8) -> Option<SourceError> {
+    let stray = |backslash| stray_quote(file.path(), delim, backslash).ok().flatten();
+    let line = stray(false)?;
+    stray(true)?;
+    Some(SourceError {
+        code: SHAPE_ERROR,
+        message: format!(
+            "could not read `{}` as a table: on line {}, a quoted field goes on after its closing quote",
+            file_name(&file.source),
+            file.line(line)
+        ),
+        help: Some(
+            "inside a quoted field write a quote as `\"\"` (`\"12\"\" pipe\"`), and end the field at its closing quote".into(),
+        ),
+    })
+}
+
+/// The first line (1-based) holding a quoted field whose closing `"` is followed by something
+/// other than the delimiter, whitespace or a line break, read with [`Quoting`].
+fn stray_quote(path: &Path, delim: u8, backslash: bool) -> std::io::Result<Option<u64>> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut q = Quoting::new(backslash);
+    let (mut line, mut prev) = (1u64, 0u8);
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            return Ok(None);
+        }
+        for &b in buf {
+            let closing = q.closing;
+            q.feed(b, delim);
+            if closing && b != b'"' && b != delim && !b.is_ascii_whitespace() {
+                return Ok(Some(line));
+            }
+            if b == b'\r' || (b == b'\n' && prev != b'\r') {
+                line += 1;
+            }
+            prev = b;
+        }
+        let n = buf.len();
+        reader.consume(n);
+    }
 }
 
 /// How many bytes at the start of a file the delimiter is guessed from.
@@ -1409,10 +1480,26 @@ struct Ragged {
     widest: (u64, usize),
 }
 
-/// Counts fields per record (see [`records`]); blank lines are skipped.
+/// Counts fields per record (see [`records`]); blank lines are skipped. Quotes inside quoted
+/// fields are read as `""`; a file that also has `\"` inside quoted fields and whose lines differ
+/// that way is counted again with `\` escaping, and the count with fewer differing lines is kept
+/// (DuckDB's sniffer chooses the escape the same way).
 fn ragged(path: &Path, delim: u8) -> std::io::Result<Ragged> {
+    let plain = ragged_with(path, delim, false)?;
+    if plain.1 && plain.0.total > 0 {
+        let escaped = ragged_with(path, delim, true)?;
+        if escaped.0.total < plain.0.total {
+            return Ok(escaped.0);
+        }
+    }
+    Ok(plain.0)
+}
+
+/// [`ragged`] with the given escape, and whether a `\"` was read inside a quoted field.
+fn ragged_with(path: &Path, delim: u8, backslash: bool) -> std::io::Result<(Ragged, bool)> {
     let mut out = Ragged::default();
-    records(path, delim, |l| {
+    let reader = BufReader::new(File::open(path)?);
+    let saw = records_in(reader, delim, backslash, |l| {
         let Line::Record {
             lines: (start, _),
             fields,
@@ -1441,7 +1528,7 @@ fn ragged(path: &Path, delim: u8) -> std::io::Result<Ragged> {
             }
         }
     })?;
-    Ok(out)
+    Ok((out, saw))
 }
 
 /// A section of a CSV file: a maximal run of non-blank lines. A blank line holds only whitespace

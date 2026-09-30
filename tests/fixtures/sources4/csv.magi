@@ -1,0 +1,22 @@
+source hash = csv("hash.csv") {
+    row_number: rn
+    schema {
+        account: int?
+        amount: decimal(10, 2)?
+        ref: string
+    }
+}
+
+source quotes = csv("quotes.csv")
+
+source backslash = csv("backslash.csv")
+
+# `at` is declared a date: midnight timestamps are dates, 12:00 is not
+source temporal = csv("temporal.csv") { schema { at: date? } }
+
+export hash to "out/hash.csv"
+export hash.rejects to "out/hash_rejects.csv"
+export quotes to "out/quotes.csv"
+export backslash to "out/backslash.csv"
+export temporal to "out/temporal.csv"
+export temporal.rejects to "out/temporal_rejects.csv"

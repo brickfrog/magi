@@ -1,0 +1,3 @@
+source stray = csv("stray.csv")
+
+export stray to "out/stray.csv"

@@ -12,12 +12,15 @@
 //! A value that does not fit its type (letters in an `N` field, `20261399` in a `D` field) is
 //! handed over as written, so staging lists it in the source's rejects.
 //!
-//! Records are the file's lines (LF or CRLF). Fields are cut from each record's bytes and then
-//! decoded, so a single-byte encoding (`encoding: "cp1252"`) never shifts a position. `record:`
-//! keeps only the records that start with the given code (e.g. `"D"` for detail records, leaving
-//! out the header and trailer); every kept record must be as long as the others and reach the
-//! layout's last byte, so a misaligned file stops the run instead of reading shifted fields.
-//! Messages name lines and fields, never values.
+//! Records are the file's lines: a line ends at LF, CRLF or a lone CR (classic Mac files). A
+//! file without line breaks (a mainframe "fixed block" file) is read with `record_length: N` as
+//! consecutive records of N bytes; without it, such a file at least twice as long as the layout
+//! stops the run, since it may hold one record or several. Fields are cut from each record's
+//! bytes and then decoded, so a single-byte encoding (`encoding: "cp1252"`) never shifts a
+//! position. `record:` keeps only the records that start with the given code (e.g. `"D"` for
+//! detail records, leaving out the header and trailer); every kept record must be as long as the
+//! others and reach the layout's last byte, so a misaligned file stops the run instead of reading
+//! shifted fields. Messages name lines (records, with `record_length`) and fields, never values.
 
 use std::path::{Path, PathBuf};
 
@@ -36,6 +39,8 @@ pub struct FixedWidthOptions {
     pub encoding: Option<String>,
     /// Keep only records starting with this code.
     pub record: Option<String>,
+    /// Records are consecutive blocks of this many bytes (a file without line breaks).
+    pub record_length: Option<usize>,
     /// Fields whose blank values take the nearest non-blank value above them.
     pub fill_down: Vec<String>,
     /// Name of the column holding each record's 1-based data row number (added at staging).
@@ -199,9 +204,84 @@ fn read_layout(path: &Path) -> Result<Vec<Field>, SourceError> {
     Ok(fields)
 }
 
-/// Reads the records of the fixed-width file at `path`.
-pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, SourceError> {
-    let fields = read_layout(&opts.layout)?;
+/// The records of a fixed-width file: its lines (ended by LF, CRLF or a lone CR; no record after
+/// the last line break), or with `record_length` consecutive blocks of that many bytes. A file
+/// without line breaks at least twice as long as the layout (`needed` bytes) is refused without
+/// `record_length`: it may hold one record or several.
+fn split<'b>(
+    bytes: &'b [u8],
+    record_length: Option<usize>,
+    needed: usize,
+    name: &str,
+) -> Result<Vec<&'b [u8]>, SourceError> {
+    if let Some(len) = record_length {
+        if bytes.len() % len != 0 {
+            return Err(SourceError {
+                code: "M200",
+                message: format!(
+                    "`{name}` is {} bytes, which is not a whole number of {len}-byte records",
+                    bytes.len()
+                ),
+                help: Some(
+                    "check `record_length`: a file of fixed blocks has no line breaks, and every block is one record".into(),
+                ),
+            });
+        }
+        return Ok(bytes.chunks(len).collect());
+    }
+    let mut records = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                records.push(&bytes[start..i]);
+                start = i + 1;
+            }
+            b'\r' => {
+                records.push(&bytes[start..i]);
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    i += 1;
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if start < bytes.len() {
+        records.push(&bytes[start..]);
+    }
+    if records.len() == 1 && needed > 0 && bytes.len() >= 2 * needed {
+        return Err(SourceError {
+            code: "M200",
+            message: format!(
+                "`{name}` has no line breaks: its {} bytes may hold one record or several (the layout reads {needed} bytes)",
+                bytes.len()
+            ),
+            help: Some(
+                "a file of fixed blocks without line breaks needs `record_length: N`, the length of one record in bytes".into(),
+            ),
+        });
+    }
+    Ok(records)
+}
+
+/// Reads the records of the fixed-width file at `path`. Fields for which `as_text` holds (those
+/// declared `string`) are read as text whatever their layout type: they keep the field as written
+/// (`20240131`, `001500`), only the padding blanks removed.
+pub fn read_fixed(
+    path: &Path,
+    opts: &FixedWidthOptions,
+    as_text: &dyn Fn(&str) -> bool,
+) -> Result<StagedTable, SourceError> {
+    let fields: Vec<Field> = read_layout(&opts.layout)?
+        .into_iter()
+        .map(|f| Field {
+            kind: if as_text(&f.name) { Kind::Text } else { f.kind },
+            ..f
+        })
+        .collect();
     let enc = encoding(opts.encoding.as_deref())?;
     let name = file_name(path);
     let bytes = std::fs::read(path).map_err(|e| format!("cannot read `{name}`: {e}"))?;
@@ -213,16 +293,17 @@ pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, 
     let code = opts.record.as_deref().map(str::as_bytes);
 
     let mut table = StagedTable::default();
-    let mut lines = bytes.split(|&b| b == b'\n').enumerate().peekable();
+    // messages and rejects cite file lines, or record numbers with `record_length`
+    let unit = if opts.record_length.is_some() {
+        "record"
+    } else {
+        "line"
+    };
+    let records = split(bytes, opts.record_length, needed, &name)?;
     // the length of the first kept record, and its line
     let mut width: Option<(usize, usize)> = None;
-    while let Some((i, line)) = lines.next() {
-        // the empty piece after the last line break is no record
-        if line.is_empty() && lines.peek().is_none() {
-            break;
-        }
+    for (i, record) in records.into_iter().enumerate() {
         let n = i + 1;
-        let record = line.strip_suffix(b"\r").unwrap_or(line);
         if code.is_some_and(|c| !record.starts_with(c)) {
             continue;
         }
@@ -232,7 +313,7 @@ pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, 
                 return Err(SourceError {
                     code: "M200",
                     message: format!(
-                        "`{name}` line {n}: the record is {} bytes, the one on line {first} is {w}",
+                        "`{name}` {unit} {n}: the record is {} bytes, the one on {unit} {first} is {w}",
                         record.len()
                     ),
                     help: Some(
@@ -247,7 +328,7 @@ pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, 
             return Err(SourceError {
                 code: "M200",
                 message: format!(
-                    "`{name}` line {n}: the record is {} bytes, the layout reads up to byte {needed}",
+                    "`{name}` {unit} {n}: the record is {} bytes, the layout reads up to byte {needed}",
                     record.len()
                 ),
                 help: Some(match &opts.record {
@@ -263,7 +344,7 @@ pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, 
                 .decode_without_bom_handling_and_without_replacement(raw)
                 .ok_or_else(|| {
                     format!(
-                        "`{name}` line {n}: field `{}` is not valid {} text",
+                        "`{name}` {unit} {n}: field `{}` is not valid {} text",
                         f.name,
                         enc.name()
                     )
@@ -327,7 +408,8 @@ pub fn read_fixed(path: &Path, opts: &FixedWidthOptions) -> Result<StagedTable, 
 }
 
 /// A field's canonical text (see [`crate::source::staged`]); `None` when blank. Text that does not
-/// fit the field's type is kept as written, for staging to reject.
+/// fit the field's type is kept as written (`20241399` stays `20241399`), for staging to reject
+/// and the rejects to show as it is in the file.
 fn value(text: &str, kind: Kind) -> Option<String> {
     let t = text.trim_matches(' ');
     if t.is_empty() {
@@ -337,7 +419,9 @@ fn value(text: &str, kind: Kind) -> Option<String> {
     Some(match kind {
         Kind::Text | Kind::Number => t.to_string(),
         Kind::Date if t.bytes().all(|b| b == b'0') => return None,
-        Kind::Date if t.len() == 8 && digits(t) => format!("{}-{}-{}", &t[..4], &t[4..6], &t[6..]),
+        Kind::Date if t.len() == 8 && digits(t) && calendar_date(t) => {
+            format!("{}-{}-{}", &t[..4], &t[4..6], &t[6..])
+        }
         Kind::Date => t.to_string(),
         Kind::Cents => {
             let (sign, d) = match t.strip_prefix('-') {
@@ -358,6 +442,21 @@ fn value(text: &str, kind: Kind) -> Option<String> {
     })
 }
 
+/// `YYYYMMDD` (8 digits) names a day of the proleptic Gregorian calendar.
+fn calendar_date(t: &str) -> bool {
+    let n = |r: std::ops::Range<usize>| t[r].parse::<u32>().unwrap_or(0);
+    let (y, m, d) = (n(0..4), n(4..6), n(6..8));
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=days).contains(&d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +472,7 @@ mod tests {
             layout,
             encoding: None,
             record: None,
+            record_length: None,
             fill_down: Vec::new(),
             row_number: None,
         }
@@ -386,6 +486,10 @@ mod tests {
         assert_eq!(value("20260131", Kind::Date).as_deref(), Some("2026-01-31"));
         assert_eq!(value("00000000", Kind::Date), None);
         assert_eq!(value("2026013X", Kind::Date).as_deref(), Some("2026013X"));
+        // not a day of the calendar: kept as written, for the rejects to show
+        assert_eq!(value("20241399", Kind::Date).as_deref(), Some("20241399"));
+        assert_eq!(value("20230229", Kind::Date).as_deref(), Some("20230229"));
+        assert_eq!(value("20240229", Kind::Date).as_deref(), Some("2024-02-29"));
         assert_eq!(value("01500", Kind::Cents).as_deref(), Some("15.00"));
         assert_eq!(value("00005", Kind::Cents).as_deref(), Some("0.05"));
         assert_eq!(value("-7", Kind::Cents).as_deref(), Some("-0.07"));
@@ -409,7 +513,7 @@ mod tests {
         let mut o = opts(layout);
         o.encoding = Some("cp1252".into());
         o.record = Some("D".into());
-        let t = read_fixed(&file, &o).unwrap();
+        let t = read_fixed(&file, &o, &|_| false).unwrap();
         assert_eq!(t.source_rows, vec![2, 3]);
         assert_eq!(
             t.rows[0],
@@ -421,11 +525,16 @@ mod tests {
             ]
         );
         assert_eq!(t.rows[1][1].as_deref(), Some("AB"));
+        // a field declared `string` keeps its text as written
+        let raw = read_fixed(&file, &o, &|f| f == "day" || f == "fee").unwrap();
+        assert_eq!(raw.rows[0][2].as_deref(), Some("20260131"));
+        assert_eq!(raw.rows[0][3].as_deref(), Some("0150"));
+        assert_eq!(raw.columns[2].inferred, Type::String);
         assert_eq!(t.rows[1][2], None);
         assert_eq!(t.columns[3].inferred, Type::Decimal(4, 2));
         // as UTF-8 the same bytes are not text
         o.encoding = None;
-        let err = read_fixed(&file, &o).unwrap_err().message;
+        let err = read_fixed(&file, &o, &|_| false).unwrap_err().message;
         assert!(err.contains("line 2") && err.contains("`name`"), "{err}");
     }
 
@@ -434,14 +543,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let layout = write(&dir, "l.csv", b"field,start,length\na,1,2\nb,3,2\n");
         let short = write(&dir, "s.txt", b"aabb\naab\n");
-        let err = read_fixed(&short, &opts(layout.clone()))
+        let err = read_fixed(&short, &opts(layout.clone()), &|_| false)
             .unwrap_err()
             .message;
         assert!(err.contains("line 2") && err.contains("line 1"), "{err}");
         let header = write(&dir, "h.txt", b"H\naabb\n");
-        let err = read_fixed(&header, &opts(layout)).unwrap_err();
+        let err = read_fixed(&header, &opts(layout), &|_| false).unwrap_err();
         assert!(err.message.contains("up to byte 4"), "{}", err.message);
         assert!(err.help.unwrap().contains("record:"));
+    }
+
+    #[test]
+    fn records_end_at_any_line_break_or_come_in_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = write(&dir, "l.csv", b"field,start,length\na,1,2\nb,3,2\n");
+        let read = |bytes: &[u8], record_length| {
+            let file = write(&dir, "f.txt", bytes);
+            let mut o = opts(layout.clone());
+            o.record_length = record_length;
+            read_fixed(&file, &o, &|_| false)
+        };
+        // lone CRs, as classic Mac files end lines
+        assert_eq!(read(b"aabb\rccdd\r", None).unwrap().rows.len(), 2);
+        // no line breaks: one record, or several?
+        let err = read(b"aabbccdd", None).unwrap_err();
+        assert!(err.help.unwrap().contains("record_length"));
+        let t = read(b"aabbccdd", Some(4)).unwrap();
+        assert_eq!(t.source_rows, vec![1, 2]);
+        assert_eq!(t.rows[1][0].as_deref(), Some("cc"));
+        assert!(read(b"aabbccd", Some(4)).is_err());
     }
 
     #[test]
@@ -450,7 +580,7 @@ mod tests {
         let file = write(&dir, "f.txt", b"aabb\n");
         let bad = |layout: &[u8]| {
             let l = write(&dir, "l.csv", layout);
-            read_fixed(&file, &opts(l)).unwrap_err().message
+            read_fixed(&file, &opts(l), &|_| false).unwrap_err().message
         };
         assert!(bad(b"name,from,to\na,1,2\n").contains("`field`, `start` and `length`"));
         assert!(bad(b"field,start,length\na,1,2\nb,2,2\n").contains("`b` overlaps `a`"));

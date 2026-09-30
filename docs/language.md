@@ -72,7 +72,8 @@ megabyte the same number of fields, so a title line with stray commas does not d
 Bank and ERP exports often wrap the table in other lines. A *section* is a run of non-blank lines,
 numbered from 1; a blank line is empty or holds only whitespace, or only delimiters and whitespace
 (`,,,,`, what a spreadsheet writes for an empty row). Lines end in LF, CRLF or a lone CR (classic
-Mac files), as DuckDB reads them. Quoting follows DuckDB's reader: `"` starts
+Mac files), as DuckDB reads them. The quote character is always `"` and no line is a comment
+(`#N/A` in a first column is a value). Quoting follows DuckDB's reader: `"` starts
 a quoted field only as the first character of a field (`PIPE 12" STEEL` is plain text), and a
 line break inside a quoted field does not end a line. A file that writes quotes inside quoted
 fields as `\"` instead of `""` is read the same way unless that changes where the chosen section
@@ -141,20 +142,25 @@ are not read or reported; a title row touching the table (no blank row between t
 the section, and is reported like a title in a table without `range` (M201); a section the sheet
 does not have is M213, listing the sections with their rows.
 
-`fixed_width(path)` reads a mainframe-style export: one record per line (LF or CRLF), each field
-at fixed byte positions given by `layout:`, a CSV with the columns `field`, `start` (1-based
-byte), `length` (bytes) and optionally `type`: `A` text (the default; the padding blanks around
-it are removed), `N` a whole number (`000123`, read as `int`), `D` a `YYYYMMDD` date
-(`00000000` is none), `M` cents with the decimal point implied (`01500` is `15.00`, a decimal
-with 2 places). A value that does not fit its type is listed in the rejects (M208), and a
-declared type decides how a field is read (`tag: string` keeps `000123`). Fields are cut from
+`fixed_width(path)` reads a mainframe-style export: one record per line (LF, CRLF or a lone CR),
+each field at fixed byte positions given by `layout:`, a CSV with the columns `field`, `start`
+(1-based byte), `length` (bytes) and optionally `type`: `A` text (the default; the padding
+blanks around it are removed), `N` a whole number (`000123`, read as `int`), `D` a `YYYYMMDD`
+date (`00000000` is none), `M` cents with the decimal point implied (`01500` is `15.00`, a
+decimal with 2 places). A value that does not fit its type is listed in the rejects (M208) as
+written in the file (`20241399`), and a declared type decides how a field is read: a field
+declared `string` keeps its text as written whatever its type code (`000123`, `20240131`,
+`001500`). A file without line breaks (fixed blocks) needs `record_length: N`, the bytes of one
+record; without it such a file at least twice as long as the layout stops the run (M200), as it
+may hold one record or several. Fields are cut from
 the record's bytes before they are decoded with `encoding:` (UTF-8 by default, or a single-byte
 encoding such as `cp1252` or `latin1`), so accented letters never shift a position.
 `record: "D"` keeps only the records starting with that code, leaving out header and trailer
 records; read a trailer with its own layout (`record: "T"`) to check its record count. Every
 kept record must have the same length and reach the layout's last byte, and every field must
 be valid text in the encoding: otherwise the source cannot be read (M200, naming the line).
-Rejects and `failures.source_row` cite file lines. Overlapping or duplicate fields and unknown
+Rejects and `failures.source_row` cite file lines (record numbers with `record_length`).
+Overlapping or duplicate fields and unknown
 type codes in the layout are M200 too.
 
 SQL sources are contacted only when a command gets `--sources` (`magi run` always contacts

@@ -1,0 +1,5 @@
+field,start,length,type
+rec,1,1,A
+id,2,4,N
+day,6,8,D
+amt,14,6,M

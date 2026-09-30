@@ -1,0 +1,9 @@
+# three 19-byte records without line breaks; `amt` is declared text, so it keeps its digits
+source blocks = fixed_width("blocks.txt") {
+    layout: "layout.csv"
+    record_length: 19
+    schema { amt: string? }
+}
+
+export blocks to "out/blocks.csv"
+export blocks.rejects to "out/blocks_rejects.csv"
