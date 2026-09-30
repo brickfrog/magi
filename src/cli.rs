@@ -7,6 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::ast;
 use crate::backend::{duckdb as lower, run, sql};
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Severity};
 use crate::plan::physical::{self, Step};
@@ -16,6 +17,7 @@ use crate::semantic::load::{self, Loaded};
 use crate::semantic::resolve::{self, Options};
 use crate::semantic::schema::SchemaProvider;
 use crate::source::Reader;
+use crate::testing;
 
 #[derive(Parser)]
 #[command(
@@ -33,36 +35,8 @@ pub struct Cli {
 #[derive(Args)]
 struct Today {
     /// Date that `today()` returns; defaults to the current UTC date
-    #[arg(long = "today", value_name = "YYYY-MM-DD", value_parser = parse_date)]
+    #[arg(long = "today", value_name = "YYYY-MM-DD", value_parser = resolve::parse_date)]
     date: Option<String>,
-}
-
-/// Parse a `--today` value: a calendar date written `YYYY-MM-DD`.
-fn parse_date(s: &str) -> Result<String, String> {
-    let field = |r: std::ops::Range<usize>| -> Option<u32> {
-        let part = s.get(r)?;
-        if part.bytes().all(|c| c.is_ascii_digit()) {
-            part.parse().ok()
-        } else {
-            None
-        }
-    };
-    let shape = s.len() == 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-';
-    let (true, Some(y), Some(m), Some(d)) = (shape, field(0..4), field(5..7), field(8..10)) else {
-        return Err("expected a date written YYYY-MM-DD, e.g. 2024-01-31".into());
-    };
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let days = match m {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return Err(format!("month {m} does not exist (expected YYYY-MM-DD)")),
-    };
-    if d == 0 || d > days {
-        return Err(format!("{y:04}-{m:02} has no day {d}"));
-    }
-    Ok(s.to_string())
 }
 
 #[derive(Subcommand)]
@@ -95,6 +69,17 @@ enum Command {
         /// Only print diagnostics
         #[arg(long, short)]
         quiet: bool,
+    },
+    /// Run the `test` declarations of programs (`.magi` files, or directories searched
+    /// recursively) and compare their relations with expected files
+    Test {
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// Only run the tests whose name contains this text
+        #[arg(long)]
+        filter: Option<String>,
+        #[command(flatten)]
+        today: Today,
     },
     /// Print the generated DuckDB SQL (for one relation, or everything)
     Sql {
@@ -284,6 +269,11 @@ pub fn main() -> ExitCode {
             sources,
             today,
         } => trace(&file, &column, sources, today.date),
+        Command::Test {
+            paths,
+            filter,
+            today,
+        } => test_cmd(&paths, filter.as_deref(), today.date),
         Command::Fmt {
             paths,
             check,
@@ -347,24 +337,51 @@ fn compile(
 }
 
 fn check(file: &Path, sources: bool, today: Option<String>) -> Result<ExitCode, ExitCode> {
-    let a = analyse(file, sources, today)?;
+    let today = today.unwrap_or_else(utc_today);
+    let a = analyse(file, sources, Some(today.clone()))?;
     print_diagnostics(&a.loaded, &a.diags.list, Severity::Note);
-    let (e, w) = (
+    let (mut e, mut w) = (
         a.diags.count(Severity::Error),
         a.diags.count(Severity::Warning),
     );
+    // each test's program, for the problems its `given`s and `expect`s bring
+    let mut tested = testing::duplicate_names(&a.loaded);
+    let tests = testing::entry_tests(&a.loaded);
+    for t in &tests {
+        let p = testing::prepare(&a.loaded, t, &today).map_err(|err| {
+            eprintln!("error: {err}");
+            ExitCode::from(2)
+        })?;
+        tested.extend(testing::new_diagnostics(&a.diags.list, &p.diags.list));
+    }
+    let mut seen = Vec::new();
+    tested.retain(|d| {
+        let new = !seen.contains(d);
+        seen.push(d.clone());
+        new
+    });
+    print_diagnostics(&a.loaded, &tested, Severity::Note);
+    e += tested
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+    w += tested
+        .iter()
+        .filter(|d| d.severity == Severity::Warning)
+        .count();
     if e > 0 {
         eprintln!("{e} error(s), {w} warning(s)");
         return Ok(ExitCode::from(1));
     }
     let h = &a.hir;
     println!(
-        "ok: {} source(s), {} dataset(s), {} validation(s), {} reconciliation(s), {} export(s); {w} warning(s)",
+        "ok: {} source(s), {} dataset(s), {} validation(s), {} reconciliation(s), {} export(s), {} test(s); {w} warning(s)",
         h.sources.len(),
         h.datasets.len(),
         h.validations.len(),
         h.reconciles.len(),
-        h.exports.len()
+        h.exports.len(),
+        tests.len()
     );
     Ok(ExitCode::SUCCESS)
 }
@@ -1002,4 +1019,133 @@ fn fmt_file(file: &Path, check: bool, stdout: bool) -> u8 {
             1
         }
     }
+}
+
+/// Runs the tests of every file and keeps going after a failure; the exit code is the worst
+/// outcome: 2 when a file cannot be read, a file named explicitly has no tests or nothing is
+/// selected, 1 when a test fails or a file's tests cannot run, else 0.
+fn test_cmd(
+    paths: &[PathBuf],
+    filter: Option<&str>,
+    today: Option<String>,
+) -> Result<ExitCode, ExitCode> {
+    let files = magi_files(paths).map_err(|e| {
+        eprintln!("error: {e}");
+        ExitCode::from(2)
+    })?;
+    let today = today.unwrap_or_else(utc_today);
+    let mut worst = 0u8;
+    let mut suites = Vec::new();
+    for file in files {
+        let loaded = match load::load(&file) {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("error: {e}");
+                worst = 2;
+                continue;
+            }
+        };
+        if testing::entry_tests(&loaded).is_empty() {
+            // the entry file is the first file loaded
+            let broken = loaded
+                .diagnostics
+                .iter()
+                .any(|d| d.is_error() && d.labels.first().is_some_and(|l| l.span.file == 0));
+            if paths.contains(&file) {
+                eprintln!("error: {} declares no `test`", file.display());
+                worst = 2;
+            } else if broken {
+                // its tests may be among the statements that did not parse
+                print_diagnostics(&loaded, &loaded.diagnostics, Severity::Note);
+                worst = worst.max(1);
+            }
+            continue;
+        }
+        suites.push((file, loaded));
+    }
+    let selected = |t: &&ast::TestDecl| filter.is_none_or(|f| t.name.name.contains(f));
+    let any = suites
+        .iter()
+        .any(|(_, l)| testing::entry_tests(l).iter().any(selected));
+    if !any {
+        match filter {
+            Some(f) => eprintln!("error: no test name contains `{f}`"),
+            // a file named without tests is already reported
+            None if worst == 2 => {}
+            None => eprintln!("error: no `test` declarations found"),
+        }
+        return Err(ExitCode::from(2));
+    }
+    let (mut passed, mut failed) = (0usize, 0usize);
+    let several = suites.len() > 1;
+    for (file, loaded) in &suites {
+        let tests: Vec<&ast::TestDecl> = testing::entry_tests(loaded)
+            .into_iter()
+            .filter(selected)
+            .collect();
+        if tests.is_empty() {
+            continue;
+        }
+        if several {
+            println!("{}", file.display());
+        }
+        // The program without test changes: its warnings and notes are printed once, not per
+        // test. Its errors are not (the files a test replaces need not exist); a test whose
+        // program has errors prints them.
+        let mut reader = Reader::new(false).map_err(|e| {
+            eprintln!("error: {e}");
+            ExitCode::from(2)
+        })?;
+        let options = Options {
+            today: today.clone(),
+        };
+        let (_, mut base) =
+            resolve::analyze(loaded, &mut reader as &mut dyn SchemaProvider, &options);
+        base.list.retain(|d| !d.is_error());
+        print_diagnostics(loaded, &base.list, Severity::Note);
+        let duplicates = testing::duplicate_names(loaded);
+        if !duplicates.is_empty() {
+            print_diagnostics(loaded, &duplicates, Severity::Note);
+            eprintln!("{}: no test was run", file.display());
+            worst = worst.max(1);
+            continue;
+        }
+        for t in tests {
+            let mut p = testing::prepare(loaded, t, &today).map_err(|e| {
+                eprintln!("error: {e}");
+                ExitCode::from(2)
+            })?;
+            let own = testing::new_diagnostics(&base.list, &p.diags.list);
+            print_diagnostics(&p.loaded, &own, Severity::Note);
+            let failures = if p.diags.has_errors() {
+                vec![format!(
+                    "{} error(s) in the test's program; it did not run",
+                    p.diags.count(Severity::Error)
+                )]
+            } else {
+                let verdict = testing::run(&mut p);
+                print_diagnostics(&p.loaded, &verdict.diagnostics, Severity::Note);
+                verdict.failures
+            };
+            if failures.is_empty() {
+                println!("test {} ... ok", t.name.name);
+                passed += 1;
+            } else {
+                println!("test {} ... FAILED", t.name.name);
+                for line in failures.iter().flat_map(|f| f.lines()) {
+                    println!("  {line}");
+                }
+                failed += 1;
+            }
+        }
+    }
+    let total = passed + failed;
+    println!(
+        "{total} test{}: {passed} passed, {failed} failed",
+        if total == 1 { "" } else { "s" }
+    );
+    if failed > 0 {
+        worst = worst.max(1);
+    }
+    Ok(ExitCode::from(worst))
 }

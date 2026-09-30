@@ -1,0 +1,50 @@
+# A small reconciliation that the tests in ../tests run on other inputs.
+
+connection hq = duckdb {
+    path: "hq.duckdb"
+}
+
+source bank = csv("data/bank.csv") {
+    identity ref
+    schema {
+        ref: string
+        amount: decimal(18, 2)
+        day: date
+    }
+}
+
+source ledger = csv("data/ledger.csv") {
+    identity id
+}
+
+source offices = sql(hq) {
+    query: "SELECT office, region FROM offices"
+    identity office
+    schema {
+        office: string
+        region: string
+    }
+}
+
+validate bank {
+    require amount != 0.00 as "no zero amounts"
+}
+
+dataset due = bank
+    |> derive overdue = day < today()
+    |> select ref, overdue
+
+dataset regions = ledger
+    |> join offices on office
+    |> select id, region
+
+reconcile rec = bank as a with ledger as b {
+    block by ref
+
+    tier exact {
+        require a.amount == b.amount
+    }
+}
+
+export rec.matches to "out/matches.csv"
+export due to "out/due.csv"

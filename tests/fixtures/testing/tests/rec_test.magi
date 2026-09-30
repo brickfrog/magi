@@ -1,0 +1,57 @@
+import "../program/rec.magi"
+
+# `bank` keeps its schema: the amounts written `5` in the case file are decimals `5.00`
+test matches_by_ref {
+    given bank = "cases/bank.csv"
+    given ledger = "cases/ledger.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect rec.matches == "cases/matches.csv"
+    expect regions == "cases/regions.csv"
+    expect bank.rejects is empty
+}
+
+test wrong_matches {
+    given bank = "cases/bank.csv"
+    given ledger = "cases/ledger.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect rec.matches == "cases/matches_wrong.csv"
+    expect rec.unmatched_a is empty
+}
+
+test zero_amount {
+    given bank = "cases/bank_zero.csv"
+    given ledger = "cases/ledger.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+}
+
+test zero_amount_checked {
+    given bank = "cases/bank_zero.csv"
+    given ledger = "cases/ledger.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect bank.checks == "cases/checks_zero.csv"
+}
+
+test today_pinned {
+    today: "2026-07-01"
+    given bank = "cases/bank.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect due == "cases/due_july.csv"
+}
+
+test today_from_command_line {
+    given bank = "cases/bank.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect due == "cases/due_january.csv"
+}

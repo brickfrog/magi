@@ -13,6 +13,7 @@ they name rows, cells and counts instead.
 | M4xx | validation and run time |
 | M5xx | exports |
 | M6xx | BI models |
+| M7xx | tests |
 
 ## Syntax, names, declarations
 
@@ -135,3 +136,15 @@ they name rows, cells and counts instead.
 | M605 | warning | A relationship would add a second active filter path between two tables: a second relationship between the same tables, a triangle such as sales→customers→regions next to sales→regions, or a cycle. Power BI allows one active path, so relationships are activated in declaration order and later ones are written inactive (use `USERELATIONSHIP` in DAX for a second relationship between the same tables). |
 | M606 | error | A model table has a column whose type MAGI does not know (e.g. the result of a `duckdb.*` call); Power BI needs every column's type. Cast it in the dataset (`to_float`, `to_decimal`, `to_int`, `to_string`, `to_date`, `to_bool`). |
 | M607 | note | A metric uses `count_distinct`, `min` or `max` over a text column. Power BI (VertiPaq) compares text ignoring case, so values that differ only in case ("abc", "ABC") are one value there and two in MAGI; normalise them in the dataset (e.g. `lower`) if the measure must match. |
+
+## Tests
+
+| Code | Severity | Meaning |
+|---|---|---|
+| M701 | error | Two tests of a program have the same name (test names are their own namespace, compared exactly). `magi test` runs none of the file's tests. |
+| M702 | error | A test's `given` names no source of the program, gives the same source twice, or gives a path for a `sql(...)` source (give a whole declaration: `given x = csv("...")`). |
+| M703 | error | A test's `today:` is not a date written `YYYY-MM-DD`, or is given twice. |
+| M704 | error | An `expect` names a relation the program does not have. |
+| M705 | error | An `expect`'s file cannot be read: missing, empty (no header line), an empty header name, a line with another number of fields than the header, or invalid quoting. |
+| M706 | error | An `expect`'s file names a column the relation does not have, or one column twice (names compared ignoring case). |
+| M707 | error | A test's program still reads a `sql(...)` source; tests read only files, so replace it with `given x = csv("...")`. |

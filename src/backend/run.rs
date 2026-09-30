@@ -24,6 +24,8 @@ pub struct Outcome {
     pub diagnostics: Vec<Diagnostic>,
     /// Some check or step failed; the exit status must be non-zero.
     pub failed: bool,
+    /// Every step ran (and the exports were written): a run that stopped did not complete.
+    pub completed: bool,
 }
 
 pub struct Runner<'a> {
@@ -95,13 +97,27 @@ pub fn execute(
     options: &RunOptions,
     log: &mut dyn FnMut(&str),
 ) -> Outcome {
+    execute_keep(hir, plan, reader, options, log).0
+}
+
+/// [`execute`], returning the database with every relation the run built, for a caller that
+/// reads them afterwards (`magi test`); `None` when DuckDB could not start.
+pub fn execute_keep(
+    hir: &Hir,
+    plan: &PhysicalPlan,
+    reader: &mut Reader,
+    options: &RunOptions,
+    log: &mut dyn FnMut(&str),
+) -> (Outcome, Option<duckdb::Connection>) {
     let conn = match open(hir) {
         Ok(c) => c,
         Err(e) => {
-            return Outcome {
+            let outcome = Outcome {
                 diagnostics: vec![Diagnostic::error("M400", e)],
                 failed: true,
+                completed: false,
             };
+            return (outcome, None);
         }
     };
     let mut r = Runner {
@@ -150,10 +166,12 @@ pub fn execute(
     if !completed && !hir.exports.is_empty() {
         (r.log)("No output files were changed");
     }
-    Outcome {
+    let outcome = Outcome {
         diagnostics: r.diags,
         failed: r.failed,
-    }
+        completed,
+    };
+    (outcome, Some(r.conn))
 }
 
 fn plain(msg: impl Into<String>) -> Diagnostic {

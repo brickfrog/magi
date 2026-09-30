@@ -30,6 +30,35 @@ pub struct Options {
     pub today: String,
 }
 
+/// Check a value for [`Options::today`] (`--today`, a test's `today:`): a calendar date
+/// written `YYYY-MM-DD`.
+pub fn parse_date(s: &str) -> Result<String, String> {
+    let field = |r: std::ops::Range<usize>| -> Option<u32> {
+        let part = s.get(r)?;
+        if part.bytes().all(|c| c.is_ascii_digit()) {
+            part.parse().ok()
+        } else {
+            None
+        }
+    };
+    let shape = s.len() == 10 && s.as_bytes()[4] == b'-' && s.as_bytes()[7] == b'-';
+    let (true, Some(y), Some(m), Some(d)) = (shape, field(0..4), field(5..7), field(8..10)) else {
+        return Err("expected a date written YYYY-MM-DD, e.g. 2024-01-31".into());
+    };
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return Err(format!("month {m} does not exist (expected YYYY-MM-DD)")),
+    };
+    if d == 0 || d > days {
+        return Err(format!("{y:04}-{m:02} has no day {d}"));
+    }
+    Ok(s.to_string())
+}
+
 enum Decl<'a> {
     Source(&'a ast::SourceDecl),
     Dataset(&'a ast::DatasetDecl),
@@ -268,7 +297,10 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 Statement::Runtime(r) => self.runtime(r),
-                Statement::Import(_) | Statement::Export(_) | Statement::Model(_) => {}
+                Statement::Import(_)
+                | Statement::Export(_)
+                | Statement::Model(_)
+                | Statement::Test(_) => {}
             }
         }
     }
@@ -785,15 +817,17 @@ impl<'a> Analyzer<'a> {
     // ---- sources ------------------------------------------------------------------------------
 
     fn source(&mut self, d: &'a ast::SourceDecl) -> bool {
+        // `layout:` and other options resolve against the declaring file; the path against the
+        // file of its literal, which is a test's file for `given x = "path"`
         let base = self.base_dir(d.span);
         let path_arg = |this: &mut Self| -> Option<PathBuf> {
             match d.args.as_slice() {
                 [
                     ast::Expr {
                         kind: ExprKind::Literal(Literal::Str(p)),
-                        ..
+                        span,
                     },
-                ] => Some(base.join(p)),
+                ] => Some(this.base_dir(*span).join(p)),
                 _ => {
                     this.err(
                         Diagnostic::error(
@@ -1074,10 +1108,11 @@ impl<'a> Analyzer<'a> {
             .identity
             .as_ref()
             .map(|ids| ids.iter().map(|i| i.name.clone()).collect::<Vec<_>>());
-        let head = d
-            .name
-            .span
-            .to(d.args.last().map_or(d.kind.span, |a| a.span));
+        let head = match d.args.last() {
+            // a test's `given x = "path"`: the path is in the test's file, so point at it there
+            Some(a) if a.span.file != d.name.span.file => a.span,
+            last => d.name.span.to(last.map_or(d.kind.span, |a| a.span)),
+        };
         let src = Source {
             name: d.name.name.clone(),
             kind,

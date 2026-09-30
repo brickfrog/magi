@@ -547,3 +547,71 @@ runtime {
 
 All intermediate data lives in an in-memory DuckDB database for the duration of `magi run`
 and is discarded afterwards.
+
+## Tests
+
+```magi
+import "../reconcile.magi"
+
+test exact_payment_matches {
+    today: "2026-07-01"                                   # optional: the date today() returns
+    given bank = "cases/exact/bank.csv"                   # source `bank` as declared, another file
+    given offices = csv("cases/exact/offices.csv") {      # a whole new declaration of `offices`
+        identity office_id
+    }
+    expect bank_rec.matches == "cases/exact/matches.csv"  # rows equal the file, on its columns
+    expect bank_rec.unmatched_a is empty                  # no rows
+}
+```
+
+A `test` runs the program on small fixture inputs and compares chosen relations with expected
+files. `magi test PATHS... [--filter TEXT] [--today YYYY-MM-DD]` runs the tests of each file
+it is given (not those of the files a file imports); a directory is searched for `.magi` files
+like `magi fmt` does, and its files without tests are skipped (a file that does not parse is
+reported: its tests may be what failed to parse). `--filter` keeps the tests whose
+name contains the text. Test names are their own namespace, not relations, and are unique in a
+program (M701). `magi check` also analyses each test of the file, so mistakes in `given` and
+`expect` show while the test is written; the other commands ignore tests.
+
+A test's program is the program with its `given` sources replaced and without its `export` and
+`model` statements: a test writes no file, and every relation is computed. `given x = "path"`
+keeps the declaration of source `x` and replaces only its path; the path resolves against the
+test's file, while the declaration's options (a fixed-width `layout:`, `schema`, `all_text`)
+stay as declared. `given x = kind("path") { ... }` replaces the whole declaration, with the
+name kept, as a `source x = ...` statement would read. `given` must name a source of the
+program, at most once per test (M702). A test reads only files: a `sql(...)` source that no
+`given` replaces is an error (M707). `today:` pins `today()` for this test; without it the
+test uses `--today`, then the current UTC date (M703 for an invalid date).
+
+`expect REL == "file.csv"` compares relation `REL` (any relation the program can export:
+`x`, `r.matches`, `s.rejects`, `v.checks`, ...) with a file written like a MAGI CSV export: a
+header line, then comma-separated values in `"` quotes where needed. The comparison uses only
+the file's columns (names compared ignoring case), ignores row order and counts duplicate rows:
+each value is compared as the text a CSV export writes, and an empty field is null (a quoted
+`""` is the empty string). So a copy of an export with columns and rows deleted is a valid
+expectation. `expect REL is empty` requires no rows. An unknown relation (M704), a file that
+cannot be read (M705) and a header naming a column the relation does not have, or one column
+twice (M706), are errors found by analysis.
+
+A test runs like `magi run --keep-going`, so a failed `require` does not stop it. It fails when
+its program has errors or its run stops, when an expectation does not hold, or when a `require`
+or `expect` check of the program fails, unless the test expects that validation's `.checks` or
+`.failures` (the test then says what it expects of the checks); `warn` never fails a test.
+`magi test` prints one line per test, the reasons under each failure (at most 10 missing and 10
+unexpected rows per expectation, sorted by value), and a summary:
+
+```text
+test exact_payment_matches ... ok
+test payout_with_fee ... FAILED
+  bank_rec.matches differs from cases/fee/matches.csv (on a_ref, b_ref, tier): 1 missing row, 1 unexpected row
+    missing:    a_ref=B7, b_ref=S12, tier=card_payout
+    unexpected: a_ref=B7, b_ref=S11, tier=card_payout
+  check `every GL line is either a debit or a credit` on gl_lines failed (2 rows)
+2 tests: 1 passed, 1 failed
+```
+
+The report prints the rows it compares (it is about fixture data); diagnostics still never
+print data values. The program's own warnings and notes are printed once; for each test, the
+errors of its program and the warnings its changes bring. With several files, each file's path
+precedes its tests. The exit code is 0 when every test passes, 1 when one fails, and 2 when a
+file cannot be read, a file named explicitly has no tests, or no test is selected.

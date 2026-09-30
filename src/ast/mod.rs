@@ -34,6 +34,7 @@ pub enum Statement {
     Export(ExportDecl),
     Runtime(RuntimeDecl),
     Model(ModelDecl),
+    Test(TestDecl),
 }
 
 impl Statement {
@@ -49,6 +50,7 @@ impl Statement {
             Statement::Export(d) => d.span,
             Statement::Runtime(d) => d.span,
             Statement::Model(d) => d.span,
+            Statement::Test(d) => d.span,
         }
     }
 }
@@ -651,5 +653,37 @@ pub enum ModelItem {
 pub struct ModelDecl {
     pub name: Ident,
     pub items: Vec<ModelItem>,
+    pub span: Span,
+}
+
+// ---------------------------------------------------------------------------------------------
+// tests (`magi test`)
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TestItem {
+    /// `today: "2026-07-01"`: the date `today()` returns in this test.
+    Today { date: StrLit, span: Span },
+    /// `given bank = "cases/bank.csv"`: source `bank` as declared, read from another file.
+    GivenPath {
+        name: Ident,
+        path: StrLit,
+        span: Span,
+    },
+    /// `given offices = csv("cases/offices.csv") { ... }`: a whole new declaration of source
+    /// `offices` (its span starts at `given`).
+    GivenSource(SourceDecl),
+    /// `expect r.matches == "cases/matches.csv"` (`file`) or `expect r.unmatched_a is empty`
+    /// (no `file`).
+    Expect {
+        rel: RelRef,
+        file: Option<StrLit>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TestDecl {
+    pub name: Ident,
+    pub items: Vec<TestItem>,
     pub span: Span,
 }

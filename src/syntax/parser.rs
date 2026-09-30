@@ -86,6 +86,7 @@ const STATEMENT_KEYWORDS: &[&str] = &[
     "export",
     "runtime",
     "model",
+    "test",
 ];
 
 /// Statement keywords followed by the name the statement declares.
@@ -331,6 +332,7 @@ impl Parser {
             "reconcile" => self.reconcile(start)?,
             "export" => self.export(start)?,
             "model" => self.model(start)?,
+            "test" => self.test(start)?,
             _ => {
                 let mut d = self.unexpected("a statement (`source`, `dataset`, `reconcile`, ...)");
                 if let Some(s) =
@@ -372,6 +374,11 @@ impl Parser {
         self.bump();
         let name = self.ident()?;
         self.expect(&Tok::Assign)?;
+        Ok(Statement::Source(self.source_decl(start, name)?))
+    }
+
+    /// A source declaration after `name =`: `kind(args) { options }` (also a test's `given`).
+    fn source_decl(&mut self, start: Span, name: Ident) -> PResult<SourceDecl> {
         let kind = self.ident()?;
         self.expect(&Tok::LParen)?;
         let args = self.expr_list(&Tok::RParen).map_err(|d| {
@@ -406,13 +413,70 @@ impl Parser {
                 }
             }
         }
-        Ok(Statement::Source(SourceDecl {
+        Ok(SourceDecl {
             name,
             kind,
             args,
             options,
             schema,
             identity,
+            span: start.to(self.prev_span()),
+        })
+    }
+
+    fn test(&mut self, start: Span) -> PResult<Statement> {
+        self.bump();
+        let name = self.ident()?;
+        self.expect(&Tok::LBrace)?;
+        let mut items = Vec::new();
+        loop {
+            self.skip_separators();
+            if self.eat(&Tok::RBrace) {
+                break;
+            }
+            let s = self.span();
+            if self.at_word("today") && self.peek_at(1) == &Tok::Colon {
+                self.bump();
+                self.bump();
+                let date = self.string()?;
+                items.push(TestItem::Today {
+                    span: s.to(date.span),
+                    date,
+                });
+            } else if self.eat_word("given") {
+                let name = self.ident()?;
+                self.expect(&Tok::Assign)?;
+                if matches!(self.peek(), Tok::Str(_) | Tok::BlockStr(_)) {
+                    let path = self.string()?;
+                    items.push(TestItem::GivenPath {
+                        span: s.to(path.span),
+                        name,
+                        path,
+                    });
+                } else {
+                    items.push(TestItem::GivenSource(self.source_decl(s, name)?));
+                }
+            } else if self.eat_word("expect") {
+                let rel = self.rel_ref()?;
+                let file = if self.eat(&Tok::EqEq) {
+                    Some(self.string()?)
+                } else {
+                    self.expect_word("is")?;
+                    self.expect_word("empty")?;
+                    None
+                };
+                items.push(TestItem::Expect {
+                    rel,
+                    file,
+                    span: s.to(self.prev_span()),
+                });
+            } else {
+                return Err(self.unexpected("a test item (`today:`, `given` or `expect`)"));
+            }
+        }
+        Ok(Statement::Test(TestDecl {
+            name,
+            items,
             span: start.to(self.prev_span()),
         }))
     }

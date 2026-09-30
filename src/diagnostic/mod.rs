@@ -2,8 +2,8 @@
 //!
 //! Rendering goes through `miette` so every diagnostic shows the offending source text. Codes are
 //! stable identifiers (`M0xx` syntax/resolution, `M1xx` types, `M2xx` sources, `M3xx`
-//! reconciliation, `M4xx` validation/run time, `M5xx` exports, `M6xx` BI models); see
-//! `docs/diagnostics.md`.
+//! reconciliation, `M4xx` validation/run time, `M5xx` exports, `M6xx` BI models, `M7xx` tests);
+//! see `docs/diagnostics.md`.
 
 use std::fmt;
 

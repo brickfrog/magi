@@ -13,3 +13,5 @@
 - `src/reconcile` — the reconciliation model and its lowering (documented in `lower.rs`).
 - `src/backend` — the SQL AST/renderer, DuckDB lowering and the executor.
 - `src/source`, `src/export` — Excel (calamine / rust_xlsxwriter), ODBC (odbc-api), files.
+- `src/testing` — `test` declarations: a test's program (given sources, no exports), its run
+  and the comparison with expected files (`magi test`).

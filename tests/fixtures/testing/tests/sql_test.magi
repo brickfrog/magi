@@ -1,0 +1,7 @@
+import "../program/rec.magi"
+
+# `offices` still reads the database
+test keeps_database {
+    given bank = "cases/bank.csv"
+    expect rec.unmatched_a is empty
+}

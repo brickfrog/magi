@@ -12,6 +12,7 @@ semantics.
 magi check   analysis.magi              # parse, resolve, type check (no execution)
 magi plan    analysis.magi              # the steps a run would take
 magi run     analysis.magi              # execute and write exports
+magi test    tests/                     # run `test` declarations: fixture inputs, expected files
 magi explain analysis.magi matches      # how a relation is computed
 magi sql     analysis.magi matches      # the DuckDB SQL `run` executes (whole program: settings first)
 magi schema  analysis.magi a            # columns of a source or relation
@@ -55,7 +56,8 @@ Both join inputs have a `category` column, so the program groups by `clean_a.cat
 ## Documentation
 
 - [`docs/language.md`](docs/language.md): the language: sources and source contracts,
-  datasets, expressions and functions, validation, reconciliation, exports, BI models, runtime.
+  datasets, expressions and functions, validation, reconciliation, exports, BI models, runtime,
+  tests.
 - [`docs/architecture.md`](docs/architecture.md): the compiler pipeline and the source layout.
 - [`docs/diagnostics.md`](docs/diagnostics.md): every diagnostic code.
 - [`docs/roadmap.md`](docs/roadmap.md): what is not implemented yet.

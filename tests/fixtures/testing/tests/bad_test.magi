@@ -1,0 +1,16 @@
+import "../program/rec.magi"
+
+test broken {
+    given bank = "cases/bank.csv"
+    given warehouse = "cases/bank.csv"
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+    expect rec.matches == "cases/bad_header.csv"
+}
+
+test broken {
+    given offices = csv("cases/offices.csv") {
+        identity office
+    }
+}

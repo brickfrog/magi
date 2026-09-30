@@ -38,7 +38,7 @@ impl Span {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceFile {
     pub path: PathBuf,
     /// Display name used in diagnostics.
@@ -58,7 +58,7 @@ impl SourceFile {
 }
 
 /// All `.magi` files that make up one program (the entry file plus imports).
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SourceMap {
     pub files: Vec<SourceFile>,
 }

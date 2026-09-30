@@ -1,0 +1,2 @@
+check,status,failing_rows
+no zero amounts,fail,1

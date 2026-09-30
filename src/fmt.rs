@@ -99,6 +99,7 @@ enum Item<'a> {
     Part(&'a ExportPart),
     Step(&'a Step),
     Model(&'a ModelItem),
+    Test(&'a TestItem),
 }
 
 impl Item<'_> {
@@ -147,6 +148,12 @@ impl Item<'_> {
                 | ModelItem::Relationship { span, .. }
                 | ModelItem::Dimension { span, .. }
                 | ModelItem::Metric { span, .. } => *span,
+            },
+            Item::Test(t) => match t {
+                TestItem::Today { span, .. }
+                | TestItem::GivenPath { span, .. }
+                | TestItem::Expect { span, .. } => *span,
+                TestItem::GivenSource(d) => d.span,
             },
         };
         (span.start, span.end)
@@ -436,6 +443,10 @@ impl Formatter<'_> {
                 let items: Vec<Item> = options.iter().map(Item::Opt).collect();
                 self.braced(header, &items, *span, limit, false, true);
             }
+            Item::Test(TestItem::GivenSource(d)) => {
+                let (header, items) = self.source_parts("given", d);
+                self.braced(header, &items, d.span, limit, false, true);
+            }
             _ => {
                 let mut text = self.render(|| self.item_text(it));
                 // Newline-separated items are not self-delimiting when the next one could
@@ -553,6 +564,17 @@ impl Formatter<'_> {
                     format!("dimension {} = {}", ident(name), column_name(column))
                 }
                 ModelItem::Metric { name, .. } => format!("metric {}", ident(name)),
+            },
+            Item::Test(t) => match t {
+                TestItem::Today { date, .. } => format!("today: {}", str_lit(date)),
+                TestItem::GivenPath { name, path, .. } => {
+                    format!("given {} = {}", ident(name), str_lit(path))
+                }
+                TestItem::GivenSource(d) => format!("given {}", ident(&d.name)),
+                TestItem::Expect { rel, file, .. } => match file {
+                    Some(f) => format!("expect {} == {}", rel_ref(rel), str_lit(f)),
+                    None => format!("expect {} is empty", rel_ref(rel)),
+                },
             },
             Item::Part(p) => {
                 // The keyword (`sheet` / `table`) is not in the AST; keep the one written.
@@ -689,19 +711,7 @@ impl Formatter<'_> {
                 self.braced("runtime".into(), &items, span, limit, false, false);
             }
             Statement::Source(d) => {
-                let header = self.render(|| {
-                    let args: Vec<String> = d.args.iter().map(|a| self.expr(a)).collect();
-                    format!(
-                        "source {} = {}({})",
-                        ident(&d.name),
-                        ident(&d.kind),
-                        args.join(", ")
-                    )
-                });
-                let mut items: Vec<Item> = d.options.iter().map(Item::Opt).collect();
-                items.extend(d.schema.as_ref().map(Item::Schema));
-                items.extend(d.identity.as_deref().map(Item::Identity));
-                items.sort_by_key(|it| it.range().0);
+                let (header, items) = self.source_parts("source", d);
                 self.braced(header, &items, span, limit, false, true);
             }
             Statement::Mapping(d) => {
@@ -762,7 +772,37 @@ impl Formatter<'_> {
                     false,
                 );
             }
+            Statement::Test(d) => {
+                let items: Vec<Item> = d.items.iter().map(Item::Test).collect();
+                self.braced(
+                    format!("test {}", ident(&d.name)).into(),
+                    &items,
+                    span,
+                    limit,
+                    false,
+                    false,
+                );
+            }
         }
+    }
+
+    /// `<keyword> name = kind(args)` and the option block's items of a source declaration
+    /// (`source` statement, a test's `given`).
+    fn source_parts<'d>(&self, keyword: &str, d: &'d SourceDecl) -> (Rendered, Vec<Item<'d>>) {
+        let header = self.render(|| {
+            let args: Vec<String> = d.args.iter().map(|a| self.expr(a)).collect();
+            format!(
+                "{keyword} {} = {}({})",
+                ident(&d.name),
+                ident(&d.kind),
+                args.join(", ")
+            )
+        });
+        let mut items: Vec<Item> = d.options.iter().map(Item::Opt).collect();
+        items.extend(d.schema.as_ref().map(Item::Schema));
+        items.extend(d.identity.as_deref().map(Item::Identity));
+        items.sort_by_key(|it| it.range().0);
+        (header, items)
     }
 
     fn dataset(&mut self, d: &DatasetDecl, limit: u32) {
@@ -1654,7 +1694,32 @@ dataset summary = clean_a
 
 export summary to "summary.xlsx"
 "#,
+        // tests
+        r#"
+import "../reconcile.magi"
+
+test exact_payment_matches {
+    today: "2026-07-01"  # pinned
+    given bank = "cases/exact/bank.csv"
+
+    # the warehouse, from a file
+    given offices = csv("cases/exact/offices.csv") {
+        identity office_id
+    }
+    expect bank_rec.matches == "cases/exact/matches.csv"
+    expect bank_rec.unmatched_a is empty
+}
+
+test nothing {}
+"#,
     ];
+
+    #[test]
+    fn tests_format_one_item_per_line() {
+        let src = "test t{today:\"2026-01-01\";given b=\"x.csv\" given o=csv(\"o.csv\"){identity id} expect r.matches==\"m.csv\";expect r.unmatched_a is empty}";
+        let expected = "test t {\n    today: \"2026-01-01\"\n    given b = \"x.csv\"\n    given o = csv(\"o.csv\") {\n        identity id\n    }\n    expect r.matches == \"m.csv\"\n    expect r.unmatched_a is empty\n}\n";
+        assert_eq!(assert_round_trip(src), expected);
+    }
 
     #[test]
     fn rich_sample_round_trips() {

@@ -12,6 +12,7 @@ mod reconcile;
 mod semantic;
 mod source;
 mod syntax;
+mod testing;
 
 fn main() -> std::process::ExitCode {
     cli::main()
