@@ -470,6 +470,20 @@ fn find_relation<'h>(
     })
 }
 
+/// The declared spelling of a relation or reconcile named on the command line: names are
+/// case-insensitive. An unknown name is returned unchanged (and reported by the caller).
+fn declared_name(hir: &Hir, name: &str) -> String {
+    hir.relation(name)
+        .map(|r| r.name.clone())
+        .or_else(|| {
+            hir.reconciles
+                .iter()
+                .find(|r| r.name.eq_ignore_ascii_case(name))
+                .map(|r| r.name.clone())
+        })
+        .unwrap_or_else(|| name.to_string())
+}
+
 /// Sources with unknown columns (no declared schema, not contacted) that `nodes` read, directly
 /// or through other relations. SQL and plans shown for such nodes leave those columns out.
 fn unknown_sources<'n>(hir: &Hir, nodes: impl IntoIterator<Item = &'n Node>) -> Vec<String> {
@@ -608,10 +622,11 @@ fn sql_cmd(
             })
             .collect(),
         Some(t) => {
+            let t = &declared_name(hir, t);
             let prod = physical::producers(hir);
             let node = match prod.get(t) {
                 Some(n) => n.clone(),
-                None => match hir.reconciles.iter().position(|r| r.name == t) {
+                None => match hir.reconciles.iter().position(|r| &r.name == t) {
                     Some(i) => Node::Reconcile(i),
                     None => {
                         find_relation(hir, t)?;
@@ -656,8 +671,9 @@ fn explain(
 ) -> Result<ExitCode, ExitCode> {
     let a = analyse_ok(file, sources, today, Severity::Error)?;
     let hir = &a.hir;
+    let target = &declared_name(hir, target);
     let prod = physical::producers(hir);
-    let rc_index = hir.reconciles.iter().position(|r| r.name == target);
+    let rc_index = hir.reconciles.iter().position(|r| &r.name == target);
     let node = match (prod.get(target), rc_index) {
         (Some(n), _) => n.clone(),
         (None, Some(i)) => Node::Reconcile(i),
@@ -827,7 +843,7 @@ fn schema(
 ) -> Result<ExitCode, ExitCode> {
     let mut a = analyse_ok(file, sources, today, Severity::Error)?;
     let rel = find_relation(&a.hir, name)?.clone();
-    let src = a.hir.sources.iter().find(|s| s.name == name).cloned();
+    let src = a.hir.sources.iter().find(|s| s.name == rel.name).cloned();
     let inferred = match &src {
         Some(s) => a.reader.infer(s, &a.hir.connections).ok().flatten(),
         None => None,

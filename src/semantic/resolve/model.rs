@@ -32,7 +32,7 @@ impl<'a> Analyzer<'a> {
         // tables, in order of first mention
         let mut names: Vec<(String, crate::syntax::span::Span)> = Vec::new();
         let mut mention = |n: &ast::Ident| {
-            if !names.iter().any(|(x, _)| x == &n.name) {
+            if !names.iter().any(|(x, _)| x.eq_ignore_ascii_case(&n.name)) {
                 names.push((n.name.clone(), n.span));
             }
         };
@@ -67,19 +67,20 @@ impl<'a> Analyzer<'a> {
         let mut ok = true;
         let mut tables: Vec<ModelTable> = Vec::new();
         let mut scope = Scope::default();
-        for (slot, (name, span)) in names.iter().enumerate() {
-            let Some(rel) = self.ensure(name, Some(*span)) else {
+        for (slot, (written, span)) in names.iter().enumerate() {
+            let Some(rel) = self.ensure(written, Some(*span)) else {
                 ok = false;
                 continue;
             };
             let rel = self.relation(rel).clone();
+            let name = rel.name.clone();
             let export = self
                 .hir
                 .exports
                 .iter()
                 .find(|e| {
                     e.parts.len() == 1
-                        && e.parts[0].relation == *name
+                        && e.parts[0].relation == name
                         && matches!(e.format, ExportFormat::Parquet)
                 })
                 .map(|e| e.path.clone());
@@ -169,7 +170,10 @@ impl<'a> Analyzer<'a> {
                         match o.key.name.as_str() {
                             "description" => {
                                 let desc = self.opt_str(o);
-                                if let Some(t) = tables.iter_mut().find(|t| t.name == rel.name) {
+                                if let Some(t) = tables
+                                    .iter_mut()
+                                    .find(|t| t.name.eq_ignore_ascii_case(&rel.name))
+                                {
                                     t.description = desc;
                                 }
                             }

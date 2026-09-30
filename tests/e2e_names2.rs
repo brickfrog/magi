@@ -50,6 +50,44 @@ fn new_column_names_that_differ_only_in_case_from_a_column_are_rejected() {
     }
 }
 
+/// Relations, columns, mappings, sides, identities, validate targets and exports are found
+/// whatever case a reference is written in, and outputs use the declared spelling.
+#[test]
+fn references_in_any_case_resolve_to_the_declared_names() {
+    let fx = Fixture::new("names_ci");
+    fx.run_ok("names.magi");
+    let m = fx.csv("out/matches.csv");
+    assert_eq!(
+        m.project(&["tier", "L_id", "B_ref", "L_kind"]),
+        lines!["exact,L1,B1,fee", "exact,L2,B2,other"]
+    );
+    let more = fx.csv("out/more.csv");
+    assert_eq!(more.header, lines!["id", "Amount", "memo", "kind"]);
+    assert_eq!(more.rows.len(), 4);
+    // the command line takes names in any case too
+    let out = fx.magi(&["schema", "names.magi", "LEDGER"]);
+    out.assert_code(0);
+    assert!(out.stdout.contains("Amount"), "{}", out.stdout);
+}
+
+/// A validate block on a declaration's output (`rec.matches`, `src.rejects`) runs like any
+/// other: its failing `require` stops the run before any export.
+#[test]
+fn validate_blocks_on_outputs_run() {
+    let fx = Fixture::new("names_ci");
+    let out = fx.run("output_check.magi", &[]);
+    out.assert_code(1).assert_diagnostic("M402");
+    assert!(
+        out.stderr_flat().contains("every match is late"),
+        "{}",
+        out.stderr
+    );
+    assert!(!fx.exists("out/matches.csv"));
+    let out = fx.run("output_check.magi", &["--keep-going"]);
+    out.assert_code(1);
+    assert_eq!(fx.csv("out/matches.csv").rows.len(), 2);
+}
+
 #[test]
 fn deriving_an_existing_column_with_its_exact_name_replaces_it() {
     let fx = Fixture::new("names2");

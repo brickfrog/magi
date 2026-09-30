@@ -87,6 +87,10 @@ pub struct Analyzer<'a> {
     diags: Diagnostics,
     hir: Hir,
     decls: HashMap<String, Decl<'a>>,
+    /// Lower-case name -> declared spelling of every source, dataset and reconcile (and of
+    /// declarations that failed to parse): references are case-insensitive and resolve to the
+    /// declared spelling, which is the only spelling the HIR uses.
+    canon: HashMap<String, String>,
     validates: HashMap<String, Vec<&'a ast::ValidateDecl>>,
     mappings: HashMap<String, &'a ast::MappingDecl>,
     used_mappings: HashSet<String>,
@@ -116,6 +120,7 @@ pub fn analyze(
             ..Hir::default()
         },
         decls: HashMap::new(),
+        canon: HashMap::new(),
         validates: HashMap::new(),
         mappings: HashMap::new(),
         used_mappings: HashSet::new(),
@@ -130,6 +135,9 @@ pub fn analyze(
     a.collect(loaded);
     // A declaration that failed to parse is already reported; references to it stay silent.
     for name in &loaded.failed_names {
+        a.canon
+            .entry(name.to_ascii_lowercase())
+            .or_insert_with(|| name.clone());
         if !a.decls.contains_key(name) {
             a.state.insert(name.clone(), State::Failed);
         }
@@ -255,16 +263,22 @@ impl<'a> Analyzer<'a> {
             match stmt {
                 Statement::Source(d) => {
                     if claim(self, &d.name, "source") {
+                        self.canon
+                            .insert(d.name.name.to_ascii_lowercase(), d.name.name.clone());
                         self.decls.insert(d.name.name.clone(), Decl::Source(d));
                     }
                 }
                 Statement::Dataset(d) => {
                     if claim(self, &d.name, "dataset") {
+                        self.canon
+                            .insert(d.name.name.to_ascii_lowercase(), d.name.name.clone());
                         self.decls.insert(d.name.name.clone(), Decl::Dataset(d));
                     }
                 }
                 Statement::Reconcile(d) => {
                     if claim(self, &d.name, "reconcile") {
+                        self.canon
+                            .insert(d.name.name.to_ascii_lowercase(), d.name.name.clone());
                         self.decls.insert(d.name.name.clone(), Decl::Reconcile(d));
                     }
                 }
@@ -278,30 +292,52 @@ impl<'a> Analyzer<'a> {
                         self.connection(d);
                     }
                 }
-                Statement::Validate(v) => {
-                    let target = v.target.display();
-                    let list = self.validates.entry(target.clone()).or_default();
-                    if let Some(prev) = list.first() {
-                        let prev_span = prev.target.span;
-                        self.diags.push(
-                            Diagnostic::error(
-                                "M003",
-                                format!("`{target}` has more than one validate block"),
-                            )
-                            .label(v.target.span, "second validate block")
-                            .label(prev_span, "first one here")
-                            .help("merge the checks into one block"),
-                        );
-                    } else {
-                        list.push(v);
-                    }
-                }
                 Statement::Runtime(r) => self.runtime(r),
-                Statement::Import(_)
+                Statement::Validate(_)
+                | Statement::Import(_)
                 | Statement::Export(_)
                 | Statement::Model(_)
                 | Statement::Test(_) => {}
             }
+        }
+        // after every declaration is known, so a target written in another case finds its block
+        for stmt in loaded.statements() {
+            if let Statement::Validate(v) = stmt {
+                let target = self.canonical(&v.target.display());
+                let list = self.validates.entry(target.clone()).or_default();
+                if let Some(prev) = list.first() {
+                    let prev_span = prev.target.span;
+                    self.diags.push(
+                        Diagnostic::error(
+                            "M003",
+                            format!("`{target}` has more than one validate block"),
+                        )
+                        .label(v.target.span, "second validate block")
+                        .label(prev_span, "first one here")
+                        .help("merge the checks into one block"),
+                    );
+                } else {
+                    list.push(v);
+                }
+            }
+        }
+    }
+
+    /// The declared spelling of a relation reference (`Sales`, `REC.Matches` -> `sales`,
+    /// `rec.matches`): the base name as declared, the output part (always lower case in MAGI)
+    /// in lower case. Unknown names are returned unchanged.
+    fn canonical(&self, name: &str) -> String {
+        let (base, part) = match name.split_once('.') {
+            Some((b, p)) => (b, Some(p)),
+            None => (name, None),
+        };
+        let base = self
+            .canon
+            .get(&base.to_ascii_lowercase())
+            .map_or(base, String::as_str);
+        match part {
+            Some(p) => format!("{base}.{}", p.to_ascii_lowercase()),
+            None => base.to_string(),
         }
     }
 
@@ -330,9 +366,14 @@ impl<'a> Analyzer<'a> {
 
     /// Look up a mapping by name, recording the use.
     fn mapping(&mut self, name: &ast::Ident) -> Option<&'a ast::MappingDecl> {
-        match self.mappings.get(&name.name).copied() {
-            Some(d) => {
-                self.used_mappings.insert(name.name.clone());
+        let found = self
+            .mappings
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(&name.name))
+            .map(|(k, d)| (k.clone(), *d));
+        match found {
+            Some((declared, d)) => {
+                self.used_mappings.insert(declared);
                 Some(d)
             }
             None if self.state.get(&name.name) == Some(&State::Failed) => None,
@@ -352,6 +393,7 @@ impl<'a> Analyzer<'a> {
     /// Resolve a relation by name (`x` or `x.part`), producing it if needed. Returns the index in
     /// `hir.relations`, or `None` if it is unknown or failed (the error is already reported).
     fn ensure(&mut self, name: &str, use_span: Option<Span>) -> Option<usize> {
+        let name = &self.canonical(name);
         if let Some(&i) = self.hir.relation_index.get(name) {
             return Some(i);
         }
@@ -398,33 +440,11 @@ impl<'a> Analyzer<'a> {
                     return None;
                 }
                 self.state.insert(base.clone(), State::Done);
-                if let Some(vs) = self.validates.get(&base).cloned() {
-                    for v in vs {
-                        self.validation(v);
-                    }
-                }
+                self.validate_outputs(&base);
             }
         }
         if let Some(&i) = self.hir.relation_index.get(name) {
             return Some(i);
-        }
-        // validation parts of reconcile parts (`result.matches.failures`)
-        if let Some(part) = &part
-            && let Some((target, vpart)) = name.rsplit_once('.')
-            && (vpart == "failures" || vpart == "checks")
-            && target.contains('.')
-            && let Some(vs) = self.validates.get(target).cloned()
-            && self.ensure(target, use_span).is_some()
-        {
-            let _ = part;
-            if !self.hir.relation_index.contains_key(name) {
-                for v in vs {
-                    self.validation(v);
-                }
-            }
-            if let Some(&i) = self.hir.relation_index.get(name) {
-                return Some(i);
-            }
         }
         if let (Some(span), Some(part)) = (use_span, part) {
             let parts: Vec<String> = self
@@ -458,13 +478,36 @@ impl<'a> Analyzer<'a> {
         None
     }
 
+    /// Run the validate blocks of a declaration that was just resolved: of `base` itself, then
+    /// of its outputs (`rec.matches`, `src.rejects`), then of their `.failures` / `.checks`
+    /// (fewer parts first: validating `rec.matches` makes `rec.matches.failures`). A block
+    /// whose target does not exist is skipped here and reported where [`analyze`] resolves it.
+    fn validate_outputs(&mut self, base: &str) {
+        let prefix = format!("{base}.");
+        let mut targets: Vec<String> = self
+            .validates
+            .keys()
+            .filter(|k| *k == base || k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        targets.sort_by_key(|k| (k.matches('.').count(), k.clone()));
+        for target in targets {
+            if !self.hir.relation_index.contains_key(&target) {
+                continue;
+            }
+            for v in self.validates[&target].clone() {
+                self.validation(v);
+            }
+        }
+    }
+
     fn unknown_relation(&mut self, name: &str, span: Span) {
         let mut d = Diagnostic::error("M002", format!("unknown relation `{name}`"))
             .label(span, "not defined");
         let names: Vec<&str> = self.decls.keys().map(String::as_str).collect();
         if let Some(s) = did_you_mean(name, names) {
             d = d.help(format!("did you mean `{s}`?"));
-        } else if self.mappings.contains_key(name) {
+        } else if self.mappings.keys().any(|m| m.eq_ignore_ascii_case(name)) {
             d = d.help(format!("`{name}` is a mapping; use it with `normalize col with {name}` or `map(col, {name})`"));
         }
         self.err(d);
@@ -1042,13 +1085,20 @@ impl<'a> Analyzer<'a> {
                     ] => Some((s.clone(), *span)),
                     _ => None,
                 };
-                let Some((conn, conn_span)) = conn else {
+                let Some((mut conn, conn_span)) = conn else {
                     self.err(
                         Diagnostic::error("M007", "`sql(...)` takes a connection name")
                             .label(d.kind.span, "expected e.g. `sql(warehouse)`"),
                     );
                     return false;
                 };
+                if let Some(declared) = self
+                    .connections
+                    .keys()
+                    .find(|k| k.eq_ignore_ascii_case(&conn))
+                {
+                    conn = declared.clone();
+                }
                 if !self.connections.contains_key(&conn) {
                     // a connection whose declaration did not parse was already reported
                     if self.state.get(&conn) == Some(&State::Failed) {
@@ -1113,7 +1163,7 @@ impl<'a> Analyzer<'a> {
             Some(a) if a.span.file != d.name.span.file => a.span,
             last => d.name.span.to(last.map_or(d.kind.span, |a| a.span)),
         };
-        let src = Source {
+        let mut src = Source {
             name: d.name.name.clone(),
             kind,
             declared,
@@ -1171,7 +1221,7 @@ impl<'a> Analyzer<'a> {
                 for (name, ty) in &inf.columns {
                     let decl = declared
                         .as_ref()
-                        .and_then(|cols| cols.iter().find(|c| &c.name == name));
+                        .and_then(|cols| cols.iter().find(|c| c.name.eq_ignore_ascii_case(name)));
                     match decl {
                         Some(dc) => {
                             if !compatible_inference(*ty, dc.ty.ty, &dc.formats, text_staged) {
@@ -1188,7 +1238,11 @@ impl<'a> Analyzer<'a> {
                 }
                 if let Some(cols) = declared {
                     for dc in cols {
-                        if !inf.columns.iter().any(|(n, _)| n == &dc.name) {
+                        if !inf
+                            .columns
+                            .iter()
+                            .any(|(n, _)| n.eq_ignore_ascii_case(&dc.name))
+                        {
                             let mut diag = Diagnostic::error(
                                 "M202",
                                 format!(
@@ -1234,7 +1288,7 @@ impl<'a> Analyzer<'a> {
             let declared_at = src
                 .declared
                 .as_ref()
-                .and_then(|cols| cols.iter().find(|c| &c.name == name))
+                .and_then(|cols| cols.iter().find(|c| c.name.eq_ignore_ascii_case(name)))
                 .map(|c| c.span);
             let (span, label) = match declared_at {
                 Some(span) => (span, "reserved for MAGI's internal tables and columns"),
@@ -1261,7 +1315,7 @@ impl<'a> Analyzer<'a> {
         }
         // `fill_down` names columns of the file; `row_number` adds one
         for (name, span) in fill_down.iter().filter(|_| !open) {
-            if columns.iter().any(|(n, _)| n == name) {
+            if columns.iter().any(|(n, _)| n.eq_ignore_ascii_case(name)) {
                 continue;
             }
             let mut diag = Diagnostic::error(
@@ -1321,24 +1375,48 @@ impl<'a> Analyzer<'a> {
         if !usable {
             return false;
         }
+        // identity columns as the source spells them (names are case-insensitive)
+        let mut identity_cols: Vec<String> = Vec::new();
         if let Some(ids) = &d.identity {
             for id in ids {
-                match columns.iter().find(|(n, _)| n == &id.name) {
+                match columns
+                    .iter()
+                    .find(|(n, _)| n.eq_ignore_ascii_case(&id.name))
+                {
                     None if !open => {
-                        let mut diag = Diagnostic::error("M205", format!("identity column `{}` is not a column of `{}`", id.name, src.name)).label(id.span, "unknown column");
-                        if let Some(s) = did_you_mean(&id.name, columns.iter().map(|(n, _)| n.as_str())) {
+                        let mut diag = Diagnostic::error(
+                            "M205",
+                            format!(
+                                "identity column `{}` is not a column of `{}`",
+                                id.name, src.name
+                            ),
+                        )
+                        .label(id.span, "unknown column");
+                        if let Some(s) =
+                            did_you_mean(&id.name, columns.iter().map(|(n, _)| n.as_str()))
+                        {
                             diag = diag.help(format!("did you mean `{s}`?"));
                         }
                         self.err(diag);
                     }
-                    Some((_, ty)) if ty.nullable && src.declared.as_ref().is_some_and(|cols| cols.iter().any(|c| c.name == id.name)) => self.err(
-                        Diagnostic::warning("M206", format!("identity column `{}` is declared nullable", id.name))
-                            .label(id.span, "a row without identity cannot be traced; the run stops if one occurs")
-                            .help("declare it non-null (e.g. `string`, not `string?`)"),
-                    ),
-                    _ => {}
+                    None => identity_cols.push(id.name.clone()),
+                    Some((n, ty)) => {
+                        if ty.nullable
+                            && src.declared.as_ref().is_some_and(|cols| {
+                                cols.iter().any(|c| c.name.eq_ignore_ascii_case(n))
+                            })
+                        {
+                            self.err(
+                                Diagnostic::warning("M206", format!("identity column `{}` is declared nullable", id.name))
+                                    .label(id.span, "a row without identity cannot be traced; the run stops if one occurs")
+                                    .help("declare it non-null (e.g. `string`, not `string?`)"),
+                            );
+                        }
+                        identity_cols.push(n.clone());
+                    }
                 }
             }
+            src.identity = Some(identity_cols.clone());
         } else if !src.kind.stable_row_order() {
             self.err(
                 Diagnostic::note("M207", format!("source `{}` has no identity and database queries have no stable row order", src.name))
@@ -1348,12 +1426,6 @@ impl<'a> Analyzer<'a> {
         }
         // a null identity stops the run (M211) before anything reads the source, so identity
         // columns are never null downstream
-        let identity_cols: Vec<String> = d
-            .identity
-            .iter()
-            .flatten()
-            .map(|id| id.name.clone())
-            .collect();
         let mut cols = Vec::new();
         for (name, mut ty) in columns {
             if identity_cols.contains(&name) {
@@ -1594,10 +1666,10 @@ impl<'a> Analyzer<'a> {
     // ---- validation ---------------------------------------------------------------------------
 
     fn validation(&mut self, v: &'a ast::ValidateDecl) {
-        let target = v.target.display();
         let Some(rel) = self.rel_ref(&v.target) else {
             return;
         };
+        let target = self.relation(rel).name.clone();
         let scope = Scope::single(self.relation(rel), &target);
         let mut checks = Vec::new();
         for c in &v.checks {
@@ -1832,10 +1904,10 @@ impl<'a> Analyzer<'a> {
         }
         match &e.target {
             ast::ExportTarget::Single(r) => {
-                if self.rel_ref(r).is_none() {
+                let Some(i) = self.rel_ref(r) else {
                     return;
-                }
-                let rel = r.display();
+                };
+                let rel = self.relation(i).name.clone();
                 let default = match format {
                     ExportFormat::Xlsx => rel.chars().take(31).collect(),
                     _ => rel.replace('.', "_"),
@@ -1887,10 +1959,10 @@ impl<'a> Analyzer<'a> {
                         );
                         continue;
                     }
-                    if self.rel_ref(&p.rel).is_some() {
+                    if let Some(i) = self.rel_ref(&p.rel) {
                         parts.push(ExportPart {
                             name: p.name.value.clone(),
-                            relation: p.rel.display(),
+                            relation: self.relation(i).name.clone(),
                         });
                     }
                 }

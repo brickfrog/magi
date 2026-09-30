@@ -1,0 +1,21 @@
+# a validate block on a reconcile output and on a source's rejects
+source ledger = csv("ledger.csv") { identity id }
+
+source bank = csv("bank.csv") { identity ref }
+
+reconcile rec = ledger with bank {
+    cardinality one_to_one
+    tier exact {
+        block by a.Amount == b.amount
+    }
+}
+
+validate rec.matches {
+    require tier == "late" as "every match is late"
+}
+
+validate ledger.rejects {
+    expect row is null as "no rejects"
+}
+
+export rec.matches to "out/matches.csv"

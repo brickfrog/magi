@@ -18,9 +18,10 @@ struct Ctx {
 
 impl Ctx {
     fn side_slot(&self, id: &ast::Ident) -> Option<u8> {
-        if id.name == "a" || id.name == self.a_alias {
+        let is = |n: &str| id.name.eq_ignore_ascii_case(n);
+        if is("a") || is(&self.a_alias) {
             Some(0)
-        } else if id.name == "b" || id.name == self.b_alias {
+        } else if is("b") || is(&self.b_alias) {
             Some(1)
         } else {
             None
@@ -30,7 +31,7 @@ impl Ctx {
         self.scope
             .cols
             .iter()
-            .find(|c| c.slot == slot && c.name == name)
+            .find(|c| c.slot == slot && c.name.eq_ignore_ascii_case(name))
     }
 }
 
@@ -208,7 +209,7 @@ impl<'a> Analyzer<'a> {
                                         ),
                                     );
                                 }
-                                names.push(c.name.clone())
+                                names.push(sc.name.clone())
                             }
                             None => {
                                 self.missing_side_column(slot, &c.name, c.span, &ctx);
@@ -368,14 +369,18 @@ impl<'a> Analyzer<'a> {
                         .map(|(n, _, _)| (n.clone(), ColType::nullable(Type::Bool), true)),
                 );
             for (name, ty, is_flag) in cols {
-                if fixed.contains(&name) {
+                if fixed.iter().any(|f| f.eq_ignore_ascii_case(&name)) {
                     self.err(
                         Diagnostic::error("M307", format!("`{name}` is defined both for the whole reconciliation and in tier `{}`", t.name))
                             .label(t.span, "rename one of them"),
                     );
                     return false;
                 }
-                match tier_columns.iter_mut().find(|c| c.name == name) {
+                // one output column per name regardless of case, as DuckDB would see it
+                match tier_columns
+                    .iter_mut()
+                    .find(|c| c.name.eq_ignore_ascii_case(&name))
+                {
                     Some(c) => {
                         if c.is_flag != is_flag {
                             self.err(
@@ -1292,7 +1297,11 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 let l = lin(this, format!("{name}.{part}.{} = {}", n.name, n.text), deps);
-                let ty = if rc.flags.iter().any(|f| f.name == n.name) {
+                let ty = if rc
+                    .flags
+                    .iter()
+                    .any(|f| f.name.eq_ignore_ascii_case(&n.name))
+                {
                     ColType::nullable(Type::Bool)
                 } else {
                     n.expr.ty.with_nullable(true)
@@ -1310,12 +1319,12 @@ impl<'a> Analyzer<'a> {
                     let evidence = t
                         .evidence
                         .iter()
-                        .filter(|n| n.name == tc.name)
+                        .filter(|n| n.name.eq_ignore_ascii_case(&tc.name))
                         .map(|n| &n.expr);
                     let flags = t
                         .flags
                         .iter()
-                        .filter(|f| f.0 == tc.name)
+                        .filter(|f| f.0.eq_ignore_ascii_case(&tc.name))
                         .filter_map(|f| f.1.as_ref());
                     for e in evidence.chain(flags) {
                         for (slot, side, group) in

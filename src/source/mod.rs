@@ -837,14 +837,15 @@ fn with_row(from: TableRef) -> Query {
 /// `SELECT __magi_row, <columns> FROM (rows)` where each `fill` column's blank values (null or
 /// whitespace-only text) take the nearest non-blank value above them in [`ROW`] order, and blanks
 /// before the first non-blank become null. `rows` (which has [`ROW`]) is returned as is when no
-/// column is filled.
+/// column is filled. `fill` names match columns ignoring ASCII case, as all names do.
 fn filled(rows: Query, columns: &[String], fill: &[String]) -> Query {
-    if !columns.iter().any(|c| fill.contains(c)) {
+    let is_filled = |c: &str| fill.iter().any(|f| f.eq_ignore_ascii_case(c));
+    if !columns.iter().any(|c| is_filled(c)) {
         return rows;
     }
     let mut items = vec![(sql::col(ROW), Some(ROW.to_string()))];
     for c in columns {
-        let value = if fill.contains(c) {
+        let value = if is_filled(c) {
             let non_blank = sql::bin("<>", trimmed(sql::col(c)), str_lit(""));
             Expr::Window {
                 func: Box::new(Expr::Func {

@@ -48,6 +48,12 @@ fn passthrough(scope: &Scope) -> Vec<(TExpr, String)> {
         .collect()
 }
 
+/// The name columns of input `relation` are qualified with: the output part of `x.part`, else
+/// the relation name (`rec.matches` -> `matches`, `sales` -> `sales`).
+fn input_name(relation: &str) -> &str {
+    relation.split_once('.').map_or(relation, |(_, part)| part)
+}
+
 /// `want`, or `want_2`, `want_3`, ... if a column of `scope` already has that physical name.
 /// DuckDB names are case-insensitive, so the comparison is too.
 fn unique_phys(scope: &Scope, want: &str) -> String {
@@ -116,16 +122,17 @@ impl<'a> Analyzer<'a> {
             PipelineHead::Rel(r) => {
                 let rel = self.rel_ref(r)?;
                 let relation = self.relation(rel);
-                let qualifier = r.part.as_ref().unwrap_or(&r.name).name.clone();
+                let name = relation.name.clone();
+                let qualifier = input_name(&name).to_string();
                 State {
-                    plan: LogicalPlan::scan(r.display()),
+                    plan: LogicalPlan::scan(name.clone()),
                     scope: Scope::single(relation, &qualifier),
                     identity: relation.identity.clone(),
                     sort: None,
-                    uses: vec![r.display()],
+                    native_open: self.native_open.contains(&name),
+                    uses: vec![name],
                     backend_specific: false,
                     pending_group: None,
-                    native_open: self.native_open.contains(&r.display()),
                     input: qualifier,
                 }
             }
@@ -305,9 +312,8 @@ impl<'a> Analyzer<'a> {
                             );
                             return None;
                         };
-                        let name = c.display();
-                        self.ensure(&name, Some(i.span))?;
-                        uses.push(name);
+                        let i = self.ensure(&c.display(), Some(i.span))?;
+                        uses.push(self.relation(i).name.clone());
                     }
                 }
                 _ => self.unknown_option(o, &["dialect", "query", "inputs"], "native_sql"),
@@ -733,7 +739,7 @@ impl<'a> Analyzer<'a> {
             StepKind::Union(rel) => {
                 let other = self.rel_ref(rel)?;
                 let other_rel = self.relation(other).clone();
-                st.uses.push(rel.display());
+                st.uses.push(other_rel.name.clone());
                 let names: Vec<&str> = st.scope.cols.iter().map(|c| c.name.as_str()).collect();
                 if names
                     .iter()
@@ -755,7 +761,7 @@ impl<'a> Analyzer<'a> {
                     .columns
                     .iter()
                     .map(|c| c.name.as_str())
-                    .filter(|n| !names.contains(n))
+                    .filter(|n| !names.iter().any(|m| m.eq_ignore_ascii_case(n)))
                     .collect();
                 if (!missing.is_empty() || !extra.is_empty())
                     && !other_rel.open
@@ -799,7 +805,8 @@ impl<'a> Analyzer<'a> {
                         None => c.ty,
                     };
                     left.push((TExpr::col(0, c.phys.clone(), c.ty), c.name.clone()));
-                    right.push((TExpr::col(0, c.name.clone(), ty), c.name.clone()));
+                    let right_name = rc.map_or_else(|| c.name.clone(), |r| r.name.clone());
+                    right.push((TExpr::col(0, right_name, ty), c.name.clone()));
                     let lineage = self.hir.lineage.add(
                         format!("{dataset}: {} (union)", c.name),
                         [Some(c.lineage), rc.map(|r| r.lineage)]
@@ -818,7 +825,7 @@ impl<'a> Analyzer<'a> {
                 }
                 let left_plan =
                     std::mem::replace(&mut st.plan, LogicalPlan::scan("")).project(left);
-                let right_plan = LogicalPlan::scan(rel.display()).project(right);
+                let right_plan = LogicalPlan::scan(other_rel.name.clone()).project(right);
                 st.plan = LogicalPlan::Union {
                     inputs: vec![left_plan, right_plan],
                 };
@@ -961,16 +968,16 @@ impl<'a> Analyzer<'a> {
     ) -> Option<()> {
         let r = self.rel_ref(rel)?;
         let right_rel = self.relation(r).clone();
-        st.uses.push(rel.display());
-        let qualifier = alias
-            .map(|a| a.name.clone())
-            .unwrap_or_else(|| rel.part.as_ref().unwrap_or(&rel.name).name.clone());
-        if st
-            .scope
-            .cols
-            .iter()
-            .any(|c| c.qualifier.as_deref() == Some(qualifier.as_str()))
-        {
+        st.uses.push(right_rel.name.clone());
+        let qualifier = alias.map_or_else(
+            || input_name(&right_rel.name).to_string(),
+            |a| a.name.clone(),
+        );
+        if st.scope.cols.iter().any(|c| {
+            c.qualifier
+                .as_deref()
+                .is_some_and(|q| q.eq_ignore_ascii_case(&qualifier))
+        }) {
             self.err(
                 Diagnostic::error(
                     "M120",
@@ -985,7 +992,7 @@ impl<'a> Analyzer<'a> {
             return None;
         }
         let mut right = Scope::single(&right_rel, &qualifier);
-        if !right.open.is_empty() && self.native_open.contains(&rel.display()) {
+        if !right.open.is_empty() && self.native_open.contains(&right_rel.name) {
             self.unknown_columns("join", rel.span);
             return None;
         }
@@ -1196,7 +1203,7 @@ impl<'a> Analyzer<'a> {
         };
         new.open
             .extend(right.open.iter().map(|(q, _)| (q.clone(), 0)));
-        let right_plan = LogicalPlan::scan(rel.display());
+        let right_plan = LogicalPlan::scan(right_rel.name.clone());
         st.plan = std::mem::replace(&mut st.plan, LogicalPlan::scan("")).join(
             right_plan,
             jt,

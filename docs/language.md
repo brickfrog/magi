@@ -3,7 +3,9 @@
 Statements may appear in any order; names are global to a program and its imports. Keywords
 are contextual, so columns may be called `type`, `group` or `sort`; any other name can be
 written in backticks (`` `Unit price` ``). Names are case-insensitive, as in DuckDB: `Sales`
-and `sales` are the same name (M003). Declared names cannot contain `.` (M014), and names
+and `sales` are the same name (M003). A reference may use any case (`LEDGER.Amount` finds
+column `amount` of `ledger`); outputs keep the spelling of the declaration or the source.
+Declared names cannot contain `.` (M014), and names
 starting with `__magi` in any case are reserved (M013). Comments start with `#`.
 
 ## Sources and source contracts
@@ -254,7 +256,8 @@ validate cleaned {
 }
 ```
 
-A row check fails for rows where the condition is false (null passes, as in SQL CHECK
+Any relation can be validated, outputs such as `rec.matches` or `src.rejects` included. A row
+check fails for rows where the condition is false (null passes, as in SQL CHECK
 constraints; use `not null` for presence). A check with aggregates is evaluated once for the
 relation; it fails when the aggregate is null (no rows, or only nulls), with `measured` empty.
 `require` failures stop the run before any export (M402/M405; `--keep-going` writes

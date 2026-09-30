@@ -1,0 +1,41 @@
+# every reference below is written in another case than its declaration
+source Ledger = csv("ledger.csv") {
+    identity ID
+    schema {
+        id: string
+        Amount: decimal(10, 2)
+        memo: string
+    }
+}
+
+source bank = csv("bank.csv") { identity REF }
+
+mapping Kinds {
+    "FEE" => "fee"
+    otherwise => "other"
+}
+
+dataset Typed = LEDGER
+    |> derive kind = map(MEMO, kinds)
+    |> filter amount > 0
+
+dataset more = typed |> union TYPED
+
+reconcile Rec = typed as L with BANK as B {
+    cardinality one_to_one
+    tier exact {
+        block by l.AMOUNT == b.amount
+        evidence { Gap = 0 }
+    }
+    tier second {
+        block by l.Amount == b.Amount
+        evidence { gap = 1 }
+    }
+}
+
+validate REC.Matches {
+    require GAP >= 0
+}
+
+export rec.MATCHES to "out/matches.csv"
+export MORE to "out/more.csv"

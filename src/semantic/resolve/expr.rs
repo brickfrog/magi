@@ -57,9 +57,16 @@ impl Scope {
         }
     }
 
+    /// `q` names the input `c` comes from: its qualifier or its side (`a`, `b` or their
+    /// aliases), ignoring case.
     fn qualifier_matches(&self, c: &SCol, q: &str) -> bool {
-        c.qualifier.as_deref() == Some(q)
-            || self.slot_names.iter().any(|(n, s)| n == q && *s == c.slot)
+        c.qualifier
+            .as_deref()
+            .is_some_and(|x| x.eq_ignore_ascii_case(q))
+            || self
+                .slot_names
+                .iter()
+                .any(|(n, s)| n.eq_ignore_ascii_case(q) && *s == c.slot)
     }
 
     pub fn qualifiers(&self) -> Vec<String> {
@@ -96,15 +103,23 @@ pub enum AggMode {
 }
 
 impl<'a> Analyzer<'a> {
+    /// Resolve a column reference. Names are case-insensitive: `Amount` finds `amount` (no scope
+    /// holds two columns that differ only in case), and the column keeps its declared spelling.
     pub(super) fn lookup(&mut self, c: &ast::ColumnName, scope: &Scope) -> Option<SCol> {
         let name = &c.name.name;
         let matches: Vec<&SCol> = match &c.qualifier {
             Some(q) => scope
                 .cols
                 .iter()
-                .filter(|s| &s.name == name && scope.qualifier_matches(s, &q.name))
+                .filter(|s| {
+                    s.name.eq_ignore_ascii_case(name) && scope.qualifier_matches(s, &q.name)
+                })
                 .collect(),
-            None => scope.cols.iter().filter(|s| &s.name == name).collect(),
+            None => scope
+                .cols
+                .iter()
+                .filter(|s| s.name.eq_ignore_ascii_case(name))
+                .collect(),
         };
         match matches.as_slice() {
             [one] => return Some((*one).clone()),
@@ -130,11 +145,12 @@ impl<'a> Analyzer<'a> {
         let open = scope.open.iter().find(|(q, slot)| match &c.qualifier {
             None => true,
             Some(want) => {
-                q.as_deref() == Some(want.name.as_str())
+                q.as_deref()
+                    .is_some_and(|x| x.eq_ignore_ascii_case(&want.name))
                     || scope
                         .slot_names
                         .iter()
-                        .any(|(n, s)| n == &want.name && s == slot)
+                        .any(|(n, s)| n.eq_ignore_ascii_case(&want.name) && s == slot)
             }
         });
         if let Some((q, slot)) = open {
@@ -153,7 +169,7 @@ impl<'a> Analyzer<'a> {
         }
         if let Some(q) = &c.qualifier {
             let quals = scope.qualifiers();
-            if !quals.contains(&q.name) {
+            if !quals.iter().any(|x| x.eq_ignore_ascii_case(&q.name)) {
                 let mut d =
                     Diagnostic::error("M010", format!("`{}` is not available here", q.name))
                         .label(q.span, "unknown relation qualifier");
@@ -244,7 +260,10 @@ impl<'a> Analyzer<'a> {
             ExprKind::Paren(inner) => self.ex(inner, scope, mode, in_agg),
             ExprKind::Column(c) => {
                 if c.qualifier.is_none()
-                    && let Some((_, alias)) = scope.aliases.iter().find(|(n, _)| n == &c.name.name)
+                    && let Some((_, alias)) = scope
+                        .aliases
+                        .iter()
+                        .find(|(n, _)| n.eq_ignore_ascii_case(&c.name.name))
                 {
                     if let AggMode::Rollup { grouped, keys } = mode {
                         for slot in 0..2u8 {
@@ -919,7 +938,7 @@ impl<'a> Analyzer<'a> {
                 if let ExprKind::Column(c) = &x.kind {
                     let q = c.qualifier.as_ref().map(|q| q.name.as_str());
                     for col in &scope.cols {
-                        if col.name == c.name.name
+                        if col.name.eq_ignore_ascii_case(&c.name.name)
                             && q.is_none_or(|q| scope.qualifier_matches(col, q))
                             && !slots.contains(&col.slot)
                         {

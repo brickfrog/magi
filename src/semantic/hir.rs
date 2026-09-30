@@ -457,8 +457,12 @@ pub struct Relation {
 }
 
 impl Relation {
+    /// The column called `name`, ignoring ASCII case (names are case-insensitive, as in DuckDB;
+    /// no relation has two columns that differ only in case).
     pub fn column(&self, name: &str) -> Option<&Column> {
-        self.columns.iter().find(|c| c.name == name)
+        self.columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
     }
 }
 
@@ -797,8 +801,17 @@ pub struct Hir {
 }
 
 impl Hir {
+    /// The relation called `name` (`x`, `x.part`), ignoring ASCII case: relation names are
+    /// unique regardless of case (M003), so at most one matches.
     pub fn relation(&self, name: &str) -> Option<&Relation> {
-        self.relation_index.get(name).map(|&i| &self.relations[i])
+        let i = match self.relation_index.get(name) {
+            Some(&i) => i,
+            None => self
+                .relations
+                .iter()
+                .position(|r| r.name.eq_ignore_ascii_case(name))?,
+        };
+        Some(&self.relations[i])
     }
     pub fn add_relation(&mut self, rel: Relation) {
         self.relation_index

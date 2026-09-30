@@ -957,7 +957,12 @@ impl TableReader<'_> {
         // one before anything looks at the values.
         let data_start = if self.opts.header { r0 + 1 } else { r0 };
         let fill: Vec<usize> = (0..width)
-            .filter(|&i| self.opts.fill_down.contains(&names[i]))
+            .filter(|&i| {
+                self.opts
+                    .fill_down
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case(&names[i]))
+            })
             .collect();
         let mut last: Vec<Cell> = vec![Cell::Empty; width];
         let mut cells: Vec<Vec<Cell>> = Vec::new();
