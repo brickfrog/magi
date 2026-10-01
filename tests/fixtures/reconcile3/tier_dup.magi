@@ -1,5 +1,5 @@
-# A second definition of an evidence or flag in one tier, or for the whole reconciliation, is
-# refused (M003), also when only the case differs.
+# A second definition of an evidence or flag in one tier, or for the whole reconciliation, or a
+# second tier of the same name, is refused (M003), also when only the case differs.
 source lefts = csv("tier_case.csv") { identity id }
 source rights = csv("tier_case.csv") { identity id }
 
@@ -39,4 +39,10 @@ reconcile whole_flag = lefts as a with rights as b {
     flag review when false
     evidence { REVIEW = 1 }
     tier exact { require a.amount == b.amount }
+}
+
+reconcile tier_case = lefts as a with rights as b {
+    block by amount
+    tier Exact { require a.amount == 10 }
+    tier exact { require a.amount == 20 }
 }

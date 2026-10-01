@@ -93,7 +93,8 @@ impl<'a> Analyzer<'a> {
         };
         add("a".into(), 0);
         add("b".into(), 1);
-        if a_name != b_name {
+        // the relation names qualify columns only when they tell the sides apart
+        if !a_name.eq_ignore_ascii_case(&b_name) {
             add(a_name, 0);
             add(b_name, 1);
         }
@@ -299,7 +300,10 @@ impl<'a> Analyzer<'a> {
             let ReconcileItem::Tier(t) = item else {
                 continue;
             };
-            if let Some((_, prev)) = tier_names.iter().find(|(n, _)| n == &t.name.name) {
+            if let Some((_, prev)) = tier_names
+                .iter()
+                .find(|(n, _)| n.eq_ignore_ascii_case(&t.name.name))
+            {
                 let prev = *prev;
                 self.err(
                     Diagnostic::error("M003", format!("tier `{}` is defined twice", t.name.name))

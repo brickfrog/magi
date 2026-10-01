@@ -1,0 +1,13 @@
+# A relation reconciled with itself: its name tells no side apart, however it is spelled, so
+# only the aliases (and `a`, `b`) qualify columns.
+source lefts = csv("tier_case.csv") { identity id }
+
+reconcile same = lefts as x with lefts as y {
+    block by amount
+    tier t { require lefts.amount == 10 }
+}
+
+reconcile cased = lefts as x with LEFTS as y {
+    block by amount
+    tier t { require lefts.amount == 10 }
+}

@@ -427,14 +427,14 @@ fn tier_evidence_and_flags_are_shared_regardless_of_case() {
     );
 }
 
-/// A second evidence or flag definition in one tier or for the whole reconciliation is refused,
-/// also when only the case differs.
+/// A second evidence or flag definition in one tier or for the whole reconciliation, or a second
+/// tier of the same name, is refused, also when only the case differs.
 #[test]
-fn duplicate_evidence_or_flag_is_refused() {
+fn duplicate_evidence_flag_or_tier_is_refused() {
     let fx = Fixture::new("reconcile3");
     let out = fx.check("tier_dup.magi");
     out.assert_code(1);
-    assert_eq!(out.codes(), ["M003"; 5], "{}", out.stderr);
+    assert_eq!(out.codes(), ["M003"; 6], "{}", out.stderr);
     let flat = out.stderr_flat();
     for dup in [
         "`score` is defined twice in tier `exact`",
@@ -442,9 +442,21 @@ fn duplicate_evidence_or_flag_is_refused() {
         "`review` is defined twice in tier `exact`",
         "`Score` is defined twice in reconciliation `whole_evidence`",
         "`REVIEW` is defined twice in reconciliation `whole_flag`",
+        "tier `exact` is defined twice",
     ] {
         assert!(flat.contains(dup), "{dup}: {flat}");
     }
+}
+
+/// A relation reconciled with itself cannot qualify a column by its name, whatever the case of
+/// either spelling: both reconciliations get the same error, not a misleading ambiguity.
+#[test]
+fn relation_name_does_not_qualify_a_side_when_both_sides_are_that_relation() {
+    let fx = Fixture::new("reconcile3");
+    let out = fx.check("self_names.magi");
+    out.assert_code(1);
+    assert_eq!(out.codes(), ["M010", "M010"], "{}", out.stderr);
+    assert!(!out.stderr.contains("ambiguous"), "{}", out.stderr);
 }
 
 // ---------------------------------------------------------------------------------------------
