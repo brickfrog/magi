@@ -126,6 +126,66 @@ fn checks_columns_have_fixed_types() {
     );
 }
 
+/// `floor`, `ceil` and `round` declare the types DuckDB produces (read back from Parquet): an int
+/// stays an exact int beyond 2^53, and a decimal gets the scale of the rounding.
+#[test]
+fn rounding_functions_declare_the_types_they_produce() {
+    let f = Fixture::new("backend2");
+    f.run_ok("rounding.magi");
+    let types = |program: &str, relation: &str| -> Vec<String> {
+        let out = f.magi(&["schema", program, relation]);
+        out.assert_code(0);
+        out.stdout
+            .lines()
+            .skip(1)
+            .map(|l| {
+                let mut w = l.split_whitespace();
+                let (name, ty) = (w.next().unwrap(), w.next().unwrap());
+                format!("{name} {}", ty.trim_end_matches('?'))
+            })
+            .collect()
+    };
+    let declared = types("rounding.magi", "d");
+    assert_eq!(declared, types("rounding_read.magi", "back"));
+    assert_eq!(
+        declared[3..],
+        lines![
+            "n_floor int",
+            "n_ceil int",
+            "n_round int",
+            "m_floor decimal(18,0)",
+            "m_ceil decimal(18,0)",
+            "m_round decimal(18,0)",
+            "m_round1 decimal(18,1)",
+            "m_round5 decimal(18,2)",
+            "m_round_neg decimal(18,0)",
+        ]
+    );
+    assert_eq!(
+        f.csv("rounding_out.csv")
+            .project(&["n_floor", "n_ceil", "m_floor", "m_ceil"]),
+        lines![
+            "9007199254740993,9007199254740993,12,13",
+            "-9007199254740993,-9007199254740993,-13,-12",
+        ]
+    );
+}
+
+/// DuckDB needs the digits of `round` on a decimal when it plans the query: `check` refuses
+/// anything but a literal instead of the run failing.
+#[test]
+fn round_of_a_decimal_needs_literal_digits() {
+    let f = Fixture::new("backend2");
+    let out = f.check("round_digits.magi");
+    out.assert_code(1).assert_diagnostic("M108");
+    assert!(
+        out.stderr_flat()
+            .contains("the digits of `round` on a decimal must be a literal number"),
+        "{}",
+        out.stderr
+    );
+}
+
 /// `-(-x)`, `- -1.5` and nested comparisons run in derive, filter and validation.
 #[test]
 fn double_negation_and_nested_comparisons_run() {

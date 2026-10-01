@@ -1,0 +1,2 @@
+source r = csv("rounding.csv") { schema { id: int n: int m: decimal(18,2) } }
+dataset d = r |> derive { x = round(m, id) }

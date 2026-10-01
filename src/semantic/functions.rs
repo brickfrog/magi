@@ -284,12 +284,15 @@ pub fn resolve(name: &str, args: &[ColType]) -> Result<Resolved, FnError> {
         "abs" | "floor" | "ceil" => {
             arity(name, args, 1, 1)?;
             want(name, args, 0, numeric, "a number")?;
-            let f = match name {
-                "abs" => "abs",
-                "floor" => "floor",
-                _ => "ceil",
+            let (f, ty) = match (name, args[0].ty) {
+                ("abs", t) => ("abs", t),
+                // whole numbers: a decimal keeps its precision with scale 0, as in DuckDB
+                ("floor", Type::Decimal(p, _)) => ("floor", Type::Decimal(p, 0)),
+                ("floor", t) => ("floor", t),
+                (_, Type::Decimal(p, _)) => ("ceil", Type::Decimal(p, 0)),
+                (_, t) => ("ceil", t),
             };
-            s(f, args[0].ty, n)
+            s(f, ty, n)
         }
         "round" => {
             arity(name, args, 1, 2)?;
@@ -297,7 +300,13 @@ pub fn resolve(name: &str, args: &[ColType]) -> Result<Resolved, FnError> {
             if args.len() == 2 {
                 want(name, args, 1, int, "an int")?;
             }
-            s("round", args[0].ty, n)
+            // with digits, the scale of a decimal result is settled by the caller, which sees
+            // whether the digits are a literal
+            let ty = match args[0].ty {
+                Type::Decimal(p, _) if args.len() == 1 => Type::Decimal(p, 0),
+                t => t,
+            };
+            s("round", ty, n)
         }
         "least" | "greatest" => {
             arity(name, args, 1, usize::MAX)?;

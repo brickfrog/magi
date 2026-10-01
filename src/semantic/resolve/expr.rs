@@ -902,7 +902,24 @@ impl<'a> Analyzer<'a> {
         }
         let types: Vec<ColType> = targs.iter().map(|t| t.ty).collect();
         match functions::resolve(fname, &types) {
-            Ok(Resolved::Scalar(func, ty)) => {
+            Ok(Resolved::Scalar(func, mut ty)) => {
+                // DuckDB fixes the scale of a rounded decimal when it plans the query
+                if func == "round"
+                    && let [_, digits] = targs.as_slice()
+                    && let Type::Decimal(p, s) = ty.ty
+                {
+                    let TExprKind::Literal(Lit::Int(d)) = digits.kind else {
+                        self.err(
+                            Diagnostic::error(
+                                "M108",
+                                "the digits of `round` on a decimal must be a literal number",
+                            )
+                            .label(args[1].span, "expected e.g. `2`"),
+                        );
+                        return None;
+                    };
+                    ty.ty = Type::Decimal(p, d.clamp(0, i64::from(s)) as u8);
+                }
                 Some(TExpr::new(TExprKind::Call { func, args: targs }, ty))
             }
             Ok(Resolved::Agg(..)) => unreachable!("aggregates handled above"),

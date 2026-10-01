@@ -1,0 +1,25 @@
+# {b2} and {b1, b2, b3} both total 1, with members of +-2^53: a1 is ambiguous whether the sum
+# reads `amount` or `floor(amount)` (an int, so exact: the pruning bound must not round).
+source a_src = csv("floor_a.csv") { schema { id: string amount: int } identity id }
+source b_src = csv("floor_b.csv") { schema { id: string amount: int } identity id }
+
+reconcile floored = a_src as a with b_src as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(floor(b.amount)) == a.amount
+    }
+}
+
+reconcile plain = a_src as a with b_src as b {
+    block by none
+    tier sums {
+        subset b max_items 3
+        require sum(b.amount) == a.amount
+    }
+}
+
+export floored.matches to "out/floored_matches.csv"
+export floored.ambiguous to "out/floored_ambiguous.csv"
+export plain.matches to "out/plain_matches.csv"
+export plain.ambiguous to "out/plain_ambiguous.csv"

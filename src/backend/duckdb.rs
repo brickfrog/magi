@@ -250,6 +250,11 @@ fn call(name: &str, xs: &[TExpr], a: &[Option<&str>; 2], result: Type) -> Expr {
         TExprKind::Literal(Lit::Int(v)) if i32::try_from(*v).is_ok() => arg(i),
         _ => cast(arg(i), "INTEGER", false),
     };
+    // DuckDB computes `floor`/`ceil` of an integer in DOUBLE, which is inexact beyond 2^53 and
+    // would contradict the int type exact-sum pruning relies on; an int is already whole
+    if matches!(name, "floor" | "ceil") && xs[0].ty.ty == Type::Int {
+        return arg(0);
+    }
     match name {
         "lower" | "upper" | "trim" | "strip_accents" | "replace" | "contains" | "starts_with"
         | "length" | "concat" | "coalesce" | "nullif" | "abs" | "floor" | "ceil" | "least"

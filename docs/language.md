@@ -247,6 +247,9 @@ Operators: `+ - * / %`, `== != < <= > >=`, `and or not`, `x is [not] null`, `x [
 integer digits; more than 6 decimal places are rounded); anything else unreadable is null.
 `to_int` rounds halves away from zero whatever the input's type (`2.5` and `-2.5` become `3`
 and `-3`) and is null for text that is not a number.
+`floor`, `ceil` and `round` keep an int an exact int at any size, and give a decimal the scale
+of the result (`floor(x)` and `round(x)` scale 0, `round(x, 1)` at most 1); on a decimal the
+digits of `round` must be a literal number (M108).
 `missing(x)` is the fraction of rows where `x` is null or blank. `today()` makes results depend
 on the run date; `magi plan` says so and `--today YYYY-MM-DD` (accepted by `run`, `check`,
 `plan`, `sql`, `explain`, `schema`, `trace`) pins it. DuckDB-only scalar functions are available

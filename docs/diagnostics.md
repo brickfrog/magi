@@ -45,7 +45,7 @@ they name rows, cells and counts instead.
 | M105 | error | Operator or comparison applied to incompatible types. |
 | M106 | error | `case` / mapping branches have incompatible types. |
 | M107 | error | Unknown function namespace (only `duckdb.` exists), DuckDB has no function of that name, or the function is an aggregate or table function (`duckdb.` calls only scalar functions and macros). |
-| M108 | error | Unknown function, wrong arguments, invalid date literal, non-literal format, non-literal `regexp_extract` group. |
+| M108 | error | Unknown function, wrong arguments, invalid date literal, non-literal format, non-literal `regexp_extract` group, non-literal digits of `round` on a decimal. |
 | M109 | error | Mapping errors: unknown mapping, duplicate or non-literal pattern, pattern type mismatch. |
 | M110 | error | Aggregate in a place that does not allow one, nested aggregates, aggregate over the wrong side of a rollup. |
 | M112 | note | A dataset has same-named columns from different inputs (ignoring case); they are renamed `<input>_<column>` (a column made inside the pipeline counts as the pipeline's input), with `_2`, `_3`, ... added if that name is taken. |

@@ -1,0 +1,14 @@
+source r = csv("rounding.csv") { schema { id: int n: int m: decimal(18,2) } }
+dataset d = r |> derive {
+    n_floor = floor(n)
+    n_ceil = ceil(n)
+    n_round = round(n)
+    m_floor = floor(m)
+    m_ceil = ceil(m)
+    m_round = round(m)
+    m_round1 = round(m, 1)
+    m_round5 = round(m, 5)
+    m_round_neg = round(m, -1)
+}
+export d to "rounding.parquet"
+export d to "rounding_out.csv"

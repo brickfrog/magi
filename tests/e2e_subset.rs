@@ -444,6 +444,19 @@ fn pruning_by_sum_keeps_every_candidate_with_mixed_signs_and_nulls() {
     assert_eq!(ambiguous, pairs("plain_null_ambiguous"));
 }
 
+/// `floor` of an int is the exact int, so the sum bound adds members of +-2^53 without rounding
+/// and the larger subset with the same total stays a competing candidate.
+#[test]
+fn pruning_by_sum_of_floor_of_ints_keeps_candidates_beyond_2_pow_53() {
+    let fx = Fixture::new("subset");
+    fx.run_ok("floor.magi");
+    let pairs = |f: &str| sorted(fx.csv(&format!("out/{f}.csv")).project(&["a_id", "b_id"]));
+    let expected = lines!["a1,b1", "a1,b2", "a1,b2", "a1,b3"];
+    assert_eq!(pairs("plain_ambiguous"), expected);
+    assert_eq!(pairs("floored_ambiguous"), expected);
+    assert!(fx.csv("out/floored_matches.csv").rows.is_empty());
+}
+
 #[test]
 fn pruning_by_sum_counts_the_places_a_subset_has_left() {
     // each candidate needs all max_items places, and a2's needs two negative members last
