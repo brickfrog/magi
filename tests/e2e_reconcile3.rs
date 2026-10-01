@@ -409,6 +409,44 @@ fn already_matched_distinguishable_row_does_not_make_a_class_ambiguous() {
     }
 }
 
+/// Tiers may spell a shared evidence or flag name in any case: the column keeps the first
+/// spelling, and every tier fills it (ordinary and subset tiers, either casing direction).
+#[test]
+fn tier_evidence_and_flags_are_shared_regardless_of_case() {
+    let fx = Fixture::new("reconcile3");
+    fx.run_ok("tier_case.magi");
+    let ord = fx.csv("out/ord.csv");
+    assert_eq!(
+        ord.project(&["tier", "a_id", "Score", "NeedsReview", "flags"]),
+        lines!["exact,1,100,false,", "fallback,2,25,true,NeedsReview"]
+    );
+    let sub = fx.csv("out/sub.csv");
+    assert_eq!(
+        sub.project(&["tier", "a_id", "score", "needsreview", "flags"]),
+        lines!["exact,1,100,false,", "fallback,2,25,true,needsreview"]
+    );
+}
+
+/// A second evidence or flag definition in one tier or for the whole reconciliation is refused,
+/// also when only the case differs.
+#[test]
+fn duplicate_evidence_or_flag_is_refused() {
+    let fx = Fixture::new("reconcile3");
+    let out = fx.check("tier_dup.magi");
+    out.assert_code(1);
+    assert_eq!(out.codes(), ["M003"; 5], "{}", out.stderr);
+    let flat = out.stderr_flat();
+    for dup in [
+        "`score` is defined twice in tier `exact`",
+        "`needs_review` is defined twice in tier `exact`",
+        "`review` is defined twice in tier `exact`",
+        "`Score` is defined twice in reconciliation `whole_evidence`",
+        "`REVIEW` is defined twice in reconciliation `whole_flag`",
+    ] {
+        assert!(flat.contains(dup), "{dup}: {flat}");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // M305: `block by none` is a deliberate choice
 

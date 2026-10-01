@@ -1,0 +1,36 @@
+# Tiers name the same evidence and flag in different letter case: one output column each, and
+# every tier fills it. `ord` falls back to an ordinary tier, `sub` to a subset tier.
+source lefts = csv("tier_case.csv") { identity id }
+source rights = csv("tier_case.csv") { identity id }
+
+reconcile ord = lefts as a with rights as b {
+    block by amount
+    tier exact {
+        require a.amount == 10
+        evidence { Score = 100 }
+        flag NeedsReview when false
+    }
+    tier fallback {
+        require a.amount == 20
+        evidence { score = 25 }
+        flag needsreview
+    }
+}
+
+reconcile sub = lefts as a with rights as b {
+    block by amount
+    tier exact {
+        require a.amount == 10
+        evidence { score = 100 }
+        flag needsreview when false
+    }
+    tier fallback {
+        subset b max_items 1
+        require sum(b.amount) == a.amount
+        evidence { SCORE = 25 }
+        flag NEEDSREVIEW
+    }
+}
+
+export ord.matches to "out/ord.csv"
+export sub.matches to "out/sub.csv"

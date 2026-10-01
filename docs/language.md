@@ -329,7 +329,10 @@ reconcile result = source_a as a with source_b as b {
 
 Tiers run in order. Each tier builds **candidates** — pairs of units (rows, or groups in
 rollup tiers) that share the blocking keys and satisfy every `require` — and selects matches.
-Reconcile-level evidence can be used by name inside tiers. A tier without blocking keys compares
+Reconcile-level evidence can be used by name inside tiers. Evidence and flags defined in tiers
+become one `matches` column per name, shared by the tiers that define it in any letter case (the
+column keeps the first spelling) and null for the other tiers. Each name is defined at most once
+per tier and once for the reconciliation (M003). A tier without blocking keys compares
 every remaining pair; MAGI warns about it (M305) unless `block by none` (in the tier or for the
 reconciliation) says that this is intended.
 

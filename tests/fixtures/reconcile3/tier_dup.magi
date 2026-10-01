@@ -1,0 +1,42 @@
+# A second definition of an evidence or flag in one tier, or for the whole reconciliation, is
+# refused (M003), also when only the case differs.
+source lefts = csv("tier_case.csv") { identity id }
+source rights = csv("tier_case.csv") { identity id }
+
+reconcile evidence_twice = lefts as a with rights as b {
+    block by amount
+    tier exact {
+        evidence { score = 100 }
+        evidence { score = 25 }
+    }
+}
+
+reconcile flag_twice = lefts as a with rights as b {
+    block by amount
+    tier exact {
+        flag needs_review when false
+        flag needs_review
+    }
+}
+
+reconcile case_only = lefts as a with rights as b {
+    block by amount
+    tier exact {
+        flag Review when a.amount > 10
+        evidence { review = true }
+    }
+}
+
+reconcile whole_evidence = lefts as a with rights as b {
+    block by amount
+    evidence { score = 100 }
+    evidence { Score = 25 }
+    tier exact { require a.amount == b.amount }
+}
+
+reconcile whole_flag = lefts as a with rights as b {
+    block by amount
+    flag review when false
+    evidence { REVIEW = 1 }
+    tier exact { require a.amount == b.amount }
+}

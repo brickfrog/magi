@@ -21,7 +21,7 @@ they name rows, cells and counts instead.
 |---|---|---|
 | M001 | error | Syntax error (unexpected token or character, unterminated string, chained comparison, ...). Parsing recovers at the next statement, even after an invalid character or unterminated string, so several errors can be reported at once. |
 | M002 | error | Unknown relation, or a relation has no such output (`result.matchez`). |
-| M003 | error | A name is defined twice (relation, column, tier, identity, validate block, model). DuckDB names are case-insensitive, so this includes names that differ only in letter case: two relations `Sales` and `sales`, a new, renamed or aggregated column `X` next to a column `x`, two source columns whose names differ only in case, or a `row_number:` column named like a source column. |
+| M003 | error | A name is defined twice (relation, column, tier, identity, validate block, model, or an evidence or flag in one tier or for the whole reconciliation). DuckDB names are case-insensitive, so this includes names that differ only in letter case: two relations `Sales` and `sales`, a new, renamed or aggregated column `X` next to a column `x`, two source columns whose names differ only in case, or a `row_number:` column named like a source column. |
 | M004 | error | Import cycle, or an imported file cannot be read. |
 | M005 | warning | A mapping is never used (not reported when the program has errors: the statement using it may be one that failed). |
 | M006 | error | A relation depends on itself. |

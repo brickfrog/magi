@@ -134,6 +134,8 @@ impl<'a> Analyzer<'a> {
             };
 
         // reconcile-level clauses
+        let place = format!("reconciliation `{}`", d.name.name);
+        let mut outputs: Vec<(&str, Span)> = Vec::new();
         for item in &d.items {
             match item {
                 ReconcileItem::Block(spec, _) => {
@@ -233,6 +235,10 @@ impl<'a> Analyzer<'a> {
                 }
                 ReconcileItem::Evidence(assigns, _) => {
                     for a in assigns {
+                        if !self.output_once(&mut outputs, &a.name, &place) {
+                            ok = false;
+                            continue;
+                        }
                         match self.expr(
                             &a.expr,
                             &ctx.scope,
@@ -250,6 +256,9 @@ impl<'a> Analyzer<'a> {
                             None => ok = false,
                         }
                     }
+                }
+                ReconcileItem::Flag(f) if !self.output_once(&mut outputs, &f.name, &place) => {
+                    ok = false;
                 }
                 ReconcileItem::Flag(f) => {
                     let Some(when) = &f.when else {
@@ -358,30 +367,33 @@ impl<'a> Analyzer<'a> {
             .chain(flags.iter())
             .map(|n| n.name.clone())
             .collect();
-        for t in &tiers {
-            let cols = t
+        for t in &mut tiers {
+            let cols: Vec<(&mut String, ColType, bool)> = t
                 .evidence
-                .iter()
-                .map(|n| (n.name.clone(), n.expr.ty, false))
+                .iter_mut()
+                .map(|n| (&mut n.name, n.expr.ty, false))
                 .chain(
                     t.flags
-                        .iter()
-                        .map(|(n, _, _)| (n.clone(), ColType::nullable(Type::Bool), true)),
-                );
+                        .iter_mut()
+                        .map(|(n, _, _)| (n, ColType::nullable(Type::Bool), true)),
+                )
+                .collect();
             for (name, ty, is_flag) in cols {
-                if fixed.iter().any(|f| f.eq_ignore_ascii_case(&name)) {
+                if fixed.iter().any(|f| f.eq_ignore_ascii_case(name)) {
                     self.err(
                         Diagnostic::error("M307", format!("`{name}` is defined both for the whole reconciliation and in tier `{}`", t.name))
                             .label(t.span, "rename one of them"),
                     );
                     return false;
                 }
-                // one output column per name regardless of case, as DuckDB would see it
+                // one output column per name regardless of case, as DuckDB would see it; every
+                // tier then uses its first spelling, so lowering can look definitions up by name
                 match tier_columns
                     .iter_mut()
-                    .find(|c| c.name.eq_ignore_ascii_case(&name))
+                    .find(|c| c.name.eq_ignore_ascii_case(name))
                 {
                     Some(c) => {
+                        name.clone_from(&c.name);
                         if c.is_flag != is_flag {
                             self.err(
                                 Diagnostic::error(
@@ -406,7 +418,7 @@ impl<'a> Analyzer<'a> {
                         }
                     }
                     None => tier_columns.push(TierColumn {
-                        name,
+                        name: name.clone(),
                         ty: ColType::nullable(ty.ty),
                         is_flag,
                     }),
@@ -841,6 +853,9 @@ impl<'a> Analyzer<'a> {
         let mut flags = Vec::new();
         let mut raw: Vec<TExpr> = Vec::new();
         let mut ok = true;
+        // evidence and flag names of this tier, to refuse a second definition
+        let place = format!("tier `{}`", t.name.name);
+        let mut outputs: Vec<(&str, Span)> = Vec::new();
         for item in &t.items {
             match item {
                 TierItem::Block(spec, _) => {
@@ -935,6 +950,10 @@ impl<'a> Analyzer<'a> {
                 }
                 TierItem::Evidence(assigns, _) => {
                     for a in assigns {
+                        if !self.output_once(&mut outputs, &a.name, &place) {
+                            ok = false;
+                            continue;
+                        }
                         match self.expr(&a.expr, &ctx.scope, &mode) {
                             Some(x) => {
                                 if let Some(s) = subset_slot
@@ -955,6 +974,9 @@ impl<'a> Analyzer<'a> {
                             None => ok = false,
                         }
                     }
+                }
+                TierItem::Flag(f) if !self.output_once(&mut outputs, &f.name, &place) => {
+                    ok = false;
                 }
                 TierItem::Flag(f) => match &f.when {
                     None => flags.push((f.name.name.clone(), None, String::new())),
@@ -1559,6 +1581,32 @@ impl<'a> Analyzer<'a> {
             &["tier_index", "ambiguity_id"],
         );
         add(self, "summary", summary, None, &["position"]);
+        true
+    }
+
+    /// Record evidence or flag `name` defined in `place`; a second definition there (names
+    /// compare regardless of case) is refused instead of silently ignored.
+    fn output_once(
+        &mut self,
+        seen: &mut Vec<(&'a str, Span)>,
+        name: &'a ast::Ident,
+        place: &str,
+    ) -> bool {
+        if let Some((_, first)) = seen
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(&name.name))
+        {
+            self.err(
+                Diagnostic::error(
+                    "M003",
+                    format!("`{}` is defined twice in {place}", name.name),
+                )
+                .label(name.span, "duplicate")
+                .label(*first, "first here"),
+            );
+            return false;
+        }
+        seen.push((&name.name, name.span));
         true
     }
 }
