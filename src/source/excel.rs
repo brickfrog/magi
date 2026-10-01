@@ -1263,10 +1263,72 @@ mod tests {
     use super::*;
     use crate::source::staged::NoteLevel;
 
-    fn data(file: &str) -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("data")
-            .join(file)
+    /// Sheet `Data`: id, name, opened (dates), visits (ints), amount (decimals) in rows 2-5, a
+    /// blank row 6 and a total row 7 below the data; a second, empty sheet `Notes`.
+    fn table_a(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("a.xlsx");
+        let mut wb = rust_xlsxwriter::Workbook::new();
+        let date = rust_xlsxwriter::Format::new().set_num_format("yyyy-mm-dd");
+        let ws = wb.add_worksheet().set_name("Data").unwrap();
+        for (c, h) in ["id", "name", "opened", "visits", "amount"]
+            .iter()
+            .enumerate()
+        {
+            ws.write_string(0, c as u16, *h).unwrap();
+        }
+        let rows = [
+            ("alpha", 3, 12.5),
+            ("bravo", 7, 3.25),
+            ("charlie", 0, 100.0),
+            ("delta", 12, 0.75),
+        ];
+        for (r, (name, visits, amount)) in (1u32..).zip(rows) {
+            let day = rust_xlsxwriter::ExcelDateTime::from_ymd(2026, 1, r as u8 * 3).unwrap();
+            ws.write_number(r, 0, f64::from(r)).unwrap();
+            ws.write_string(r, 1, name).unwrap();
+            ws.write_datetime_with_format(r, 2, day, &date).unwrap();
+            ws.write_number(r, 3, f64::from(visits)).unwrap();
+            ws.write_number(r, 4, amount).unwrap();
+        }
+        ws.write_string(6, 0, "Total").unwrap();
+        ws.write_number(6, 4, 116.5).unwrap();
+        wb.add_worksheet().set_name("Notes").unwrap();
+        wb.save(&path).unwrap();
+        path
+    }
+
+    /// Sheet `Data`: a title and a subtitle above the header in row 3, data in rows 4-9, and
+    /// two columns mixing types: `event_date` (4 date and 2 text cells) and `amount` (4 number
+    /// and 2 text cells).
+    fn table_b(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("b.xlsx");
+        let mut wb = rust_xlsxwriter::Workbook::new();
+        let date = rust_xlsxwriter::Format::new().set_num_format("yyyy-mm-dd");
+        let ws = wb.add_worksheet().set_name("Data").unwrap();
+        ws.write_string(0, 0, "Quarterly events").unwrap();
+        ws.write_string(1, 0, "prepared for review").unwrap();
+        for (c, h) in ["id", "event_date", "amount", "note"].iter().enumerate() {
+            ws.write_string(2, c as u16, *h).unwrap();
+        }
+        for r in 3u32..=8 {
+            ws.write_number(r, 0, f64::from(r - 2)).unwrap();
+            match r {
+                5 => ws.write_string(r, 1, "pending").unwrap(),
+                8 => ws.write_string(r, 1, "unknown").unwrap(),
+                _ => {
+                    let day = rust_xlsxwriter::ExcelDateTime::from_ymd(2026, 2, r as u8).unwrap();
+                    ws.write_datetime_with_format(r, 1, day, &date).unwrap()
+                }
+            };
+            match r {
+                4 => ws.write_string(r, 2, "tbd").unwrap(),
+                7 => ws.write_string(r, 2, "waived").unwrap(),
+                _ => ws.write_number(r, 2, f64::from(r) * 10.5).unwrap(),
+            };
+            ws.write_string(r, 3, format!("note {r}")).unwrap();
+        }
+        wb.save(&path).unwrap();
+        path
     }
 
     fn opts(range: Option<&str>, header_row: Option<u32>) -> ExcelOptions {
@@ -1320,17 +1382,17 @@ mod tests {
     }
 
     #[test]
-    fn a_xlsx_stops_at_blank_row_and_reports_total_row() {
-        let t = read_excel(&data("a.xlsx"), &opts(None, None)).unwrap();
-        assert_eq!(t.rows.len(), 1237);
-        assert_eq!(t.columns.len(), 10);
-        assert_eq!(t.source_rows.len(), 1237);
-        assert_eq!(t.source_rows[0], 2);
-        assert!(t.rows.iter().all(|r| r.len() == 10));
+    fn data_stops_at_blank_row_and_reports_total_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = read_excel(&table_a(dir.path()), &opts(None, None)).unwrap();
+        assert_eq!(t.rows.len(), 4);
+        assert_eq!(t.columns.len(), 5);
+        assert_eq!(t.source_rows, [2, 3, 4, 5]);
+        assert!(t.rows.iter().all(|r| r.len() == 5));
         let w = warnings(&t);
         assert!(
             w.iter()
-                .any(|m| m.contains("data ends at blank row 1239") && m.contains("row")),
+                .any(|m| m.contains("data ends at blank row 6") && m.contains("(row 7)")),
             "missing ignored-row warning: {w:#?}"
         );
         assert!(!w.iter().any(|m| m.contains("header row 1 has")), "{w:#?}");
@@ -1338,22 +1400,23 @@ mod tests {
     }
 
     #[test]
-    fn b_xlsx_without_range_warns_about_header_trap() {
-        let t = read_excel(&data("b.xlsx"), &opts(None, None)).unwrap();
+    fn title_above_the_header_warns_about_header_trap() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = read_excel(&table_b(dir.path()), &opts(None, None)).unwrap();
         let w = warnings(&t);
         let trap = w
             .iter()
             .find(|m| m.contains("header row 1 has"))
             .unwrap_or_else(|| panic!("{w:#?}"));
         assert!(trap.contains("header_row: 3"), "{trap}");
-        assert!(trap.contains("range: \"A3:L1184\""), "{trap}");
+        assert!(trap.contains("range: \"A3:D9\""), "{trap}");
     }
 
     fn check_b(t: &StagedTable) {
-        assert_eq!(t.rows.len(), 1181);
-        assert_eq!(t.columns.len(), 12);
+        assert_eq!(t.rows.len(), 6);
+        assert_eq!(t.columns.len(), 4);
         assert_eq!(t.source_rows[0], 4);
-        assert_eq!(*t.source_rows.last().unwrap(), 1184);
+        assert_eq!(*t.source_rows.last().unwrap(), 9);
         let w = warnings(t);
         for name in ["event_date", "amount"] {
             let (_, c) = col(t, name);
@@ -1371,7 +1434,7 @@ mod tests {
             .find(|m| m.starts_with("column event_date:"))
             .unwrap();
         assert!(
-            date_msg.contains("date cells") && date_msg.contains("text cells"),
+            date_msg.contains("4 date cells") && date_msg.contains("2 text cells"),
             "{date_msg}"
         );
         assert_no_values_in_notes(t);
@@ -1383,23 +1446,40 @@ mod tests {
             .filter_map(|r| r[i].as_deref())
             .filter(|s| is_iso_date(s))
             .count();
-        assert!(iso > 1100, "only {iso} ISO dates");
+        assert_eq!(iso, 4);
     }
 
     #[test]
-    fn b_xlsx_with_range_or_header_row() {
-        let by_range = read_excel(&data("b.xlsx"), &opts(Some("A3:L1184"), None)).unwrap();
+    fn table_below_a_title_by_range_or_header_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let b = table_b(dir.path());
+        let by_range = read_excel(&b, &opts(Some("A3:D9"), None)).unwrap();
         check_b(&by_range);
-        let by_header = read_excel(&data("b.xlsx"), &opts(None, Some(3))).unwrap();
+        let by_header = read_excel(&b, &opts(None, Some(3))).unwrap();
         check_b(&by_header);
         assert_eq!(by_range.rows, by_header.rows);
-        let open_ended = read_excel(&data("b.xlsx"), &opts(Some("A3:L"), None)).unwrap();
+        let open_ended = read_excel(&b, &opts(Some("A3:D"), None)).unwrap();
         assert_eq!(open_ended.rows, by_range.rows);
     }
 
     #[test]
-    fn a_xlsx_types_are_canonical() {
-        let t = read_excel(&data("a.xlsx"), &opts(None, None)).unwrap();
+    fn inferred_types_are_canonical() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = read_excel(&table_a(dir.path()), &opts(None, None)).unwrap();
+        let types: Vec<Type> = t.columns.iter().map(|c| c.inferred).collect();
+        assert!(
+            matches!(
+                types[..],
+                [
+                    Type::Int,
+                    Type::String,
+                    Type::Date,
+                    Type::Int,
+                    Type::Decimal(_, 2)
+                ]
+            ),
+            "{types:?}"
+        );
         for c in &t.columns {
             let (i, _) = col(&t, &c.name);
             for v in t.rows.iter().filter_map(|r| r[i].as_deref()) {
@@ -1418,60 +1498,51 @@ mod tests {
                 }
             }
         }
-        assert!(
-            t.columns.iter().any(|c| c.inferred == Type::Date),
-            "{:?}",
-            t.columns
-        );
     }
 
     #[test]
     fn all_text_keeps_dates_iso() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = table_a(dir.path());
         let o = ExcelOptions {
             all_text: true,
             ..opts(None, None)
         };
-        let t = read_excel(&data("a.xlsx"), &o).unwrap();
+        let t = read_excel(&a, &o).unwrap();
         assert!(t.columns.iter().all(|c| c.inferred == Type::String));
-        let typed = read_excel(&data("a.xlsx"), &opts(None, None)).unwrap();
-        let (i, _) = typed
-            .columns
-            .iter()
-            .enumerate()
-            .find(|(_, c)| c.inferred == Type::Date)
-            .unwrap();
+        let (i, _) = col(&t, "opened");
         let v = t.rows[0][i].as_deref().unwrap();
-        assert!(is_iso_date(v), "{v}");
+        assert_eq!(v, "2026-01-03");
         assert!(!warnings(&t).iter().any(|m| m.contains("inferred string")));
     }
 
     #[test]
     fn missing_sheet_lists_available() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = table_a(dir.path());
         let o = ExcelOptions {
             sheet: Some("Nope".into()),
             ..ExcelOptions::default()
         };
-        let err = read_excel(&data("a.xlsx"), &o).unwrap_err().message;
+        let err = read_excel(&a, &o).unwrap_err().message;
         assert!(
-            err.contains("`Nope` not found") && err.contains("`Data`"),
+            err.contains("`Nope` not found") && err.contains("`Data`") && err.contains("`Notes`"),
             "{err}"
         );
-        assert!(
-            sheet_names(&data("a.xlsx"))
-                .unwrap()
-                .contains(&"Data".to_owned())
-        );
+        assert_eq!(sheet_names(&a).unwrap(), ["Data", "Notes"]);
     }
 
     #[test]
     fn inconsistent_range_and_header_row() {
-        let err = read_excel(&data("b.xlsx"), &opts(Some("A3:L1184"), Some(2)))
+        let dir = tempfile::tempdir().unwrap();
+        let b = table_b(dir.path());
+        let err = read_excel(&b, &opts(Some("A3:D9"), Some(2)))
             .unwrap_err()
             .message;
         assert!(err.contains("disagrees"), "{err}");
-        assert!(read_excel(&data("b.xlsx"), &opts(Some("A3:L1184"), Some(3))).is_ok());
+        assert!(read_excel(&b, &opts(Some("A3:D9"), Some(3))).is_ok());
         assert!(
-            read_excel(&data("b.xlsx"), &opts(Some("3A:L"), None))
+            read_excel(&b, &opts(Some("3A:D"), None))
                 .unwrap_err()
                 .message
                 .contains("invalid range")
