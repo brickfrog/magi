@@ -65,6 +65,7 @@ fn asof_join_takes_the_latest_row_at_or_before() {
             "R3,,",
             "R4,2026-07-01,1.30",
             "R5,,",
+            "R6,,",
         ]
     );
     assert_eq!(
@@ -76,6 +77,28 @@ fn asof_join_takes_the_latest_row_at_or_before() {
             "R4,2026-07-01,1.30"
         ]
     );
+}
+
+#[test]
+fn a_null_inequality_value_never_matches() {
+    // DuckDB 1.5's ASOF JOIN pairs a null with the latest row of its partition once the input
+    // is large enough for its sorting join (about 100 rows)
+    let fx = Fixture::new("window");
+    let mut receipts = String::from("ref,currency,day,amount\nNULL_DAY,EUR,,100.00\n");
+    for i in 0..150 {
+        receipts.push_str(&format!("X{i:03},EUR,2026-07-12,1.00\n"));
+    }
+    std::fs::write(fx.file("receipts.csv"), receipts).unwrap();
+    fx.run_ok("asof.magi");
+    let converted = fx.csv("out/converted.csv");
+    assert_eq!(
+        converted.project(&["ref", "rate_day", "rate"])[0],
+        "NULL_DAY,,"
+    );
+    assert_eq!(converted.rows.len(), 151);
+    let matched = fx.csv("out/matched.csv");
+    assert!(!matched.column("ref").contains(&"NULL_DAY".to_string()));
+    assert_eq!(matched.rows.len(), 150);
 }
 
 const LINES: &str = r#"source lines = csv("lines.csv") {
@@ -94,7 +117,7 @@ const RECEIPTS: &str = r#"source receipts = csv("receipts.csv") {
     schema {
         ref: string
         currency: string
-        day: date
+        day: date?
         amount: decimal(10, 2)
     }
 }

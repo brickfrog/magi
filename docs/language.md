@@ -241,8 +241,9 @@ The condition is `and`-ed comparisons, each between the pipeline's columns and o
 the joined relation, with exactly one of `>=`, `>`, `<=`, `<` (M127): `>=` takes the latest
 row at or before the value, `<=` the earliest at or after it. The condition's columns must
 cover an `identity` of the joined relation, so the nearest row is a single row (M128).
-`asof join` drops rows with no such row; `asof left join` keeps them with nulls. Each row is
-kept at most once, so the pipeline's identity still holds after the join.
+`asof join` drops rows with no such row (also rows whose compared value is null); `asof left
+join` keeps them with nulls. Each row is kept at most once, so the pipeline's identity still
+holds after the join.
 
 Reusable mappings:
 

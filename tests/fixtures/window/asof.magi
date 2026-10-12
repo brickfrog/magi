@@ -12,7 +12,7 @@ source receipts = csv("receipts.csv") {
     schema {
         ref: string
         currency: string
-        day: date
+        day: date?
         amount: decimal(10, 2)
     }
 }

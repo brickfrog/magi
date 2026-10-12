@@ -1141,6 +1141,8 @@ impl<'a> Analyzer<'a> {
         combined.cols.extend(right.cols.iter().cloned());
         combined.open.extend(right.open.iter().cloned());
 
+        // `probe is not null` for an asof join whose probe value can be null
+        let mut asof_probe_known: Option<TExpr> = None;
         let (cond, merged_keys) = match on {
             JoinOn::Keys(_) if asof => {
                 self.err(
@@ -1205,7 +1207,19 @@ impl<'a> Analyzer<'a> {
                     return None;
                 }
                 if asof {
-                    self.asof_condition(&t, e.span, &right_rel, &qualifier)?;
+                    let probe = self.asof_condition(&t, e.span, &right_rel, &qualifier)?;
+                    // DuckDB 1.5's ASOF JOIN pairs a null probe value with the latest row of its
+                    // partition (once the input is large enough for its sorting join); a null
+                    // compares as unknown, so it must match nothing
+                    if probe.ty.nullable {
+                        asof_probe_known = Some(TExpr::new(
+                            TExprKind::IsNull {
+                                expr: Box::new(probe),
+                                negated: true,
+                            },
+                            ColType::required(Type::Bool),
+                        ));
+                    }
                 }
                 // `on true` is an explicit cross join; any other condition that never looks at
                 // the joined relation is probably a mistake
@@ -1301,13 +1315,24 @@ impl<'a> Analyzer<'a> {
             if merged_keys.iter().any(|(_, r)| r == &c.phys) {
                 continue;
             }
+            let col = TExpr::col(1, c.phys.clone(), c.ty);
+            let expr = match (&asof_probe_known, jt) {
+                (Some(known), JoinType::AsofLeft) => TExpr::new(
+                    TExprKind::Case {
+                        arms: vec![(known.clone(), col)],
+                        otherwise: None,
+                    },
+                    c.ty.with_nullable(true),
+                ),
+                _ => col,
+            };
             out_cols.push((
                 SCol {
                     ty: c.ty.with_nullable(c.ty.nullable || right_nullable),
                     slot: 0,
                     ..c.clone()
                 },
-                TExpr::col(1, c.phys.clone(), c.ty),
+                expr,
             ));
         }
         // Physical names must be unique (ignoring case, as DuckDB does): a colliding name gets
@@ -1367,12 +1392,11 @@ impl<'a> Analyzer<'a> {
         new.open
             .extend(right.open.iter().map(|(q, _)| (q.clone(), 0)));
         let right_plan = LogicalPlan::scan(right_rel.name.clone());
-        st.plan = std::mem::replace(&mut st.plan, LogicalPlan::scan("")).join(
-            right_plan,
-            jt,
-            Some(cond),
-            output,
-        );
+        let mut left_plan = std::mem::replace(&mut st.plan, LogicalPlan::scan(""));
+        if let (Some(known), JoinType::Asof) = (asof_probe_known, jt) {
+            left_plan = left_plan.filter(known);
+        }
+        st.plan = left_plan.join(right_plan, jt, Some(cond), output);
         st.scope = new;
         st.identity = identity;
         st.sort = None;
@@ -1382,13 +1406,14 @@ impl<'a> Analyzer<'a> {
     /// An `asof join` condition: conjuncts that each compare the pipeline's columns with one
     /// column of the joined relation, exactly one of them an inequality, and equalities plus the
     /// inequality covering an identity of the joined relation so the nearest row is unique.
+    /// Returns the pipeline's side of the inequality.
     fn asof_condition(
         &mut self,
         t: &TExpr,
         span: Span,
         right_rel: &Relation,
         qualifier: &str,
-    ) -> Option<()> {
+    ) -> Option<TExpr> {
         fn conjuncts<'t>(e: &'t TExpr, out: &mut Vec<&'t TExpr>) {
             match &e.kind {
                 TExprKind::Binary {
@@ -1405,7 +1430,7 @@ impl<'a> Analyzer<'a> {
         let mut parts = Vec::new();
         conjuncts(t, &mut parts);
         let mut right_cols: Vec<String> = Vec::new();
-        let mut inequalities = 0;
+        let mut probes: Vec<TExpr> = Vec::new();
         for p in parts {
             let shape = match &p.kind {
                 TExprKind::Binary {
@@ -1419,17 +1444,17 @@ impl<'a> Analyzer<'a> {
                             if other.columns_of(1).is_empty()
                                 && !other.columns_of(0).is_empty() =>
                         {
-                            Some(name.clone())
+                            Some((name.clone(), other.clone()))
                         }
                         _ => None,
                     };
                     side(right, left)
                         .or_else(|| side(left, right))
-                        .map(|name| (name, *op != BinaryOp::Eq))
+                        .map(|(name, other)| (name, other, *op != BinaryOp::Eq))
                 }
                 _ => None,
             };
-            let Some((name, inequality)) = shape else {
+            let Some((name, probe, inequality)) = shape else {
                 self.err(
                     Diagnostic::error(
                         "M127",
@@ -1440,15 +1465,17 @@ impl<'a> Analyzer<'a> {
                 return None;
             };
             right_cols.push(name);
-            inequalities += usize::from(inequality);
+            if inequality {
+                probes.push(probe);
+            }
         }
-        if inequalities != 1 {
+        if probes.len() != 1 {
             self.err(
                 Diagnostic::error(
                     "M127",
                     "`asof join` needs exactly one of `>=`, `>`, `<=`, `<`",
                 )
-                .label(span, format!("{inequalities} inequalities")),
+                .label(span, format!("{} inequalities", probes.len())),
             );
             return None;
         }
@@ -1470,7 +1497,7 @@ impl<'a> Analyzer<'a> {
             );
             return None;
         }
-        Some(())
+        probes.pop()
     }
 }
 
