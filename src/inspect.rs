@@ -115,9 +115,14 @@ pub fn profile(
     let types: Vec<ColType> = all
         .iter()
         .map(|(name, duck)| {
-            rel.and_then(|r| r.column(name))
-                .map(|c| c.ty)
-                .unwrap_or_else(|| ColType::nullable(Type::from_duckdb(duck)))
+            // a column MAGI does not type (e.g. a `duckdb.` call) takes the type DuckDB reports
+            match rel.and_then(|r| r.column(name)).map(|c| c.ty) {
+                Some(ty) if ty.ty != Type::Unknown => ty,
+                declared => ColType::new(
+                    Type::from_duckdb(duck),
+                    declared.is_none_or(|ty| ty.nullable),
+                ),
+            }
         })
         .collect();
     let null = "CAST(NULL AS VARCHAR)".to_string();
