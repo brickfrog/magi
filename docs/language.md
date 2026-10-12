@@ -195,8 +195,9 @@ dataset cleaned = raw
     |> limit 10
 ```
 
-Steps: `select`, `drop`, `rename`, `derive`, `filter`, `[left|right|full] join`, `group by` +
-`aggregate`, `sort`, `distinct`, `union` (append, matched by column name), `limit`,
+Steps: `select`, `drop`, `rename`, `derive`, `filter`, `[left|right|full] join`,
+`asof [left] join`, `group by` + `aggregate`, `window`, `sort`, `distinct`, `union` (append,
+matched by column name), `limit`,
 `normalize col { ... }` / `normalize col with mapping`. After a join, a column that exists on
 both inputs must be qualified (`clean_a.amount`); in the output, same-named columns (ignoring
 case) are renamed `<input>_<column>` (M112; a column made inside the pipeline counts as the
@@ -205,6 +206,43 @@ the key of whichever side has the row; it takes the right key's nullability in a
 is nullable in a full join when either key is. `join x on true` is a
 cross join (every row with every row, e.g. to attach a one-row dataset of totals); any other
 condition that never mentions `x` is reported (M121). `limit` requires a preceding `sort` (M118).
+
+`window` computes columns from neighbouring rows, keeping every row:
+
+```magi
+dataset running = lines
+    |> window partition by acct order by row_no {
+        n = row_number()
+        previous = lag(balance)          # lag(x, 2), lead(x), lead(x, 3): null past the edge
+        so_far = running_sum(amount)     # first row of the partition through this one
+        acct_total = sum(amount)         # sum mean avg min max count: the whole partition
+        r = rank()                       # rank, dense_rank: ties share a rank
+    }
+```
+
+`partition by` and `order by` take column names and are optional (M126); `row_number`, `rank`,
+`dense_rank`, `lag`, `lead` and `running_sum` need `order by` (M126). Rows that tie on the
+`order by` keys are ordered by every other column, as in `sort`, so `row_number`, `lag`,
+`lead` and `running_sum` give the same result on every run; `rank` and `dense_rank` give tied
+rows the same rank. The columns of one `window` step cannot refer to each other (M126; use a
+`derive` step after it), and window functions are not allowed outside a `window` step (M125). A
+`filter` after the step sees the computed columns, e.g. `|> filter n == 1` keeps the first row
+of each partition.
+
+`asof join` attaches, to each row, the nearest row of another relation by one inequality, e.g.
+the exchange rate in force on a day:
+
+```magi
+dataset converted = receipts
+    |> asof left join rates on receipts.currency == rates.currency and receipts.day >= rates.day
+```
+
+The condition is `and`-ed comparisons, each between the pipeline's columns and one column of
+the joined relation, with exactly one of `>=`, `>`, `<=`, `<` (M127): `>=` takes the latest
+row at or before the value, `<=` the earliest at or after it. The condition's columns must
+cover an `identity` of the joined relation, so the nearest row is a single row (M128).
+`asof join` drops rows with no such row; `asof left join` keeps them with nulls. Each row is
+kept at most once, so the pipeline's identity still holds after the join.
 
 Reusable mappings:
 
@@ -222,8 +260,8 @@ file; cycles are errors).
 `native_sql { dialect: duckdb  query: """..."""  inputs: [a, b] }` is an escape hatch for
 DuckDB SQL; it is flagged as DuckDB-specific (M115) and MAGI cannot check or trace inside it.
 Without `schema { ... }` its columns are unknown, so steps that keep every column (`derive`,
-`drop`, `rename`, `normalize`, `join`, `union`) are rejected (M124); `select` the columns first
-or declare the schema.
+`window`, `drop`, `rename`, `normalize`, `join`, `union`) are rejected (M124); `select` the
+columns first or declare the schema.
 
 ## Expressions and functions
 
@@ -679,3 +717,26 @@ the comparison. `--rows N` lists up to N added and N removed rows per relation; 
 data value is printed. The exit code is 0 when the compared relations are equal, 1 when they
 differ, and 2 when a side cannot be read, is not a snapshot, or is a program that does not
 analyse or run, or a `--relation` names nothing.
+
+## Looking at relations
+
+```bash
+magi show    reconcile.magi rec.matches --rows 10 --column a_id --column b_ref
+magi profile reconcile.magi bank_lines
+```
+
+`magi show FILE RELATION [--rows N] [--column NAME]... [--today YYYY-MM-DD]` runs the program
+as `magi snapshot` does (no export is written) and prints the first N rows (default 20) of one
+relation in export order, as aligned text, then how many rows it has. `--column` (repeatable,
+any case) prints only those columns, in that order. Values are written as in a CSV export (null
+is empty, `""` is the empty string); line breaks are shown as `\n` and values longer than 40
+characters are shortened with `…`.
+
+`magi profile FILE RELATION [--today YYYY-MM-DD]` prints the relation's row count, then for each
+column its type, how many values are null, how many distinct values it has, its minimum and
+maximum, and the sum of an integer or decimal column (float sums are not printed, as they can
+differ between runs, M122).
+
+Both print data values on purpose, like `magi diff --rows`. The exit code is 0, or 1 when a
+check or step failed (the output is still printed), the relation or a column is unknown, or the
+program does not analyse or run, or 2 when the file cannot be read.

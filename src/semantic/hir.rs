@@ -62,8 +62,14 @@ pub enum WinFunc {
     Count,
     Max,
     Min,
-    /// The argument on the next row in window order (null on the last).
-    Lead,
+    /// The argument n rows later in window order (null after).
+    Lead(u64),
+    /// The argument n rows earlier in window order (null before).
+    Lag(u64),
+    Sum,
+    Mean,
+    /// Sum from the partition's first row through this row in window order (a ROWS frame).
+    RunningSum,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,7 +127,7 @@ pub enum TExprKind {
         expr: Box<TExpr>,
         ty: Type,
     },
-    /// Window function (internal: reconciliation lowering).
+    /// Window function (`window` steps and reconciliation lowering).
     Window {
         func: WinFunc,
         arg: Option<Box<TExpr>>,

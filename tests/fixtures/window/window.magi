@@ -1,0 +1,42 @@
+source lines = csv("lines.csv") {
+    identity [acct, row_no]
+    schema {
+        acct: string
+        row_no: int
+        amount: decimal(10, 2)
+        balance: decimal(10, 2)
+    }
+}
+
+source scores = csv("scores.csv") {
+    identity name
+    schema {
+        name: string
+        score: int
+    }
+}
+
+dataset running = lines
+    |> window partition by acct order by row_no {
+        n = row_number()
+        previous = lag(balance)
+        next_amount = lead(amount)
+        two_back = lag(balance, 2)
+        so_far = running_sum(amount)
+        acct_total = sum(amount)
+        acct_lines = count()
+    }
+
+dataset ranked = scores
+    |> window order by score desc {
+        r = rank()
+        d = dense_rank()
+        n = row_number()
+    }
+
+dataset first_lines = running
+    |> filter n == 1
+
+export running to "out/running.csv"
+export ranked to "out/ranked.csv"
+export first_lines to "out/first_lines.csv"

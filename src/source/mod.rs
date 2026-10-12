@@ -914,6 +914,7 @@ fn with_row(from: TableRef) -> Query {
                     func: Box::new(func("row_number", Vec::new())),
                     partition: Vec::new(),
                     order: Vec::new(),
+                    frame: None,
                 },
                 Some(ROW.into()),
             ),
@@ -949,6 +950,7 @@ fn filled(rows: Query, columns: &[String], fill: &[String]) -> Query {
                     expr: sql::col(ROW),
                     desc: false,
                 }],
+                frame: None,
             }
         } else {
             sql::col(c)
@@ -1090,6 +1092,7 @@ fn typing(src: &Source, rel: &Relation, raw_type: &dyn Fn(&str) -> Type, text: b
                     expr: sql::col(ROW),
                     desc: false,
                 }],
+                frame: None,
             };
             typed_items.push((position, Some(col.name.clone())));
             continue;

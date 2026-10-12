@@ -451,7 +451,7 @@ pub(super) fn lower_tier(
             };
             let next = |name: &str| {
                 let lead = win(
-                    WinFunc::Lead,
+                    WinFunc::Lead(1),
                     Some(c(name)),
                     vec![c("unit")],
                     vec![asc(c("idx"))],

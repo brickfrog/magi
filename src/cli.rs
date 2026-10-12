@@ -10,6 +10,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::ast;
 use crate::backend::{duckdb as lower, run, sql};
 use crate::diagnostic::{self, Diagnostic, Diagnostics, Severity};
+use crate::export;
 use crate::plan::physical::{self, Step};
 use crate::reconcile::model::Consume;
 use crate::semantic::hir::{Hir, Node, RelKind};
@@ -104,6 +105,27 @@ enum Command {
         /// Only compare this relation (repeatable)
         #[arg(long = "relation", value_name = "NAME")]
         relations: Vec<String>,
+        #[command(flatten)]
+        today: Today,
+    },
+    /// Run a program without writing its exports and print rows of one relation
+    Show {
+        file: PathBuf,
+        relation: String,
+        /// Rows to print, in export order
+        #[arg(long, value_name = "N", default_value_t = 20)]
+        rows: usize,
+        /// Print only this column (repeatable, in this order)
+        #[arg(long = "column", value_name = "NAME")]
+        columns: Vec<String>,
+        #[command(flatten)]
+        today: Today,
+    },
+    /// Run a program without writing its exports and print statistics for each column of one
+    /// relation
+    Profile {
+        file: PathBuf,
+        relation: String,
         #[command(flatten)]
         today: Today,
     },
@@ -318,6 +340,18 @@ pub fn main() -> ExitCode {
             relations,
             today,
         } => diff_cmd(&old, &new, rows, relations, today.date),
+        Command::Show {
+            file,
+            relation,
+            rows,
+            columns,
+            today,
+        } => show_cmd(&file, &relation, rows, columns, today.date),
+        Command::Profile {
+            file,
+            relation,
+            today,
+        } => profile_cmd(&file, &relation, today.date),
         Command::Fmt {
             paths,
             check,
@@ -598,6 +632,64 @@ fn diff_cmd(
             Err(ExitCode::from(2))
         }
     }
+}
+
+/// `magi show`: 0 when printed, 1 when the run failed a check or step (printed anyway), the
+/// relation or a column is unknown, or the program does not analyse or run; 2 when the file
+/// cannot be read.
+fn show_cmd(
+    file: &Path,
+    relation: &str,
+    rows: usize,
+    columns: Vec<String>,
+    today: Option<String>,
+) -> Result<ExitCode, ExitCode> {
+    let (run, failed) = program_run(file, today)?;
+    let rel = find_relation(&run.hir, relation)?;
+    let all: Vec<String> = export::describe(&run.conn, &rel.name)
+        .map_err(inspect_error)?
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    let columns = if columns.is_empty() {
+        all.clone()
+    } else {
+        let mut out = Vec::new();
+        for c in &columns {
+            let Some(found) = all.iter().find(|n| n.eq_ignore_ascii_case(c)) else {
+                match diagnostic::did_you_mean(c, all.iter().map(String::as_str)) {
+                    Some(s) => eprintln!(
+                        "error: `{}` has no column `{c}` (did you mean `{s}`?)",
+                        rel.name
+                    ),
+                    None => eprintln!("error: `{}` has no column `{c}`", rel.name),
+                }
+                return Err(ExitCode::from(1));
+            };
+            out.push(found.clone());
+        }
+        out
+    };
+    let text = crate::inspect::show(&run.conn, &run.hir, &rel.name, &all, &columns, rows)
+        .map_err(inspect_error)?;
+    print!("{text}");
+    Ok(ExitCode::from(u8::from(failed)))
+}
+
+/// `magi profile`: exit codes as `magi show`.
+fn profile_cmd(file: &Path, relation: &str, today: Option<String>) -> Result<ExitCode, ExitCode> {
+    let (run, failed) = program_run(file, today)?;
+    let rel = find_relation(&run.hir, relation)?;
+    let all = export::describe(&run.conn, &rel.name).map_err(inspect_error)?;
+    let text =
+        crate::inspect::profile(&run.conn, &run.hir, &rel.name, &all).map_err(inspect_error)?;
+    print!("{text}");
+    Ok(ExitCode::from(u8::from(failed)))
+}
+
+fn inspect_error(e: String) -> ExitCode {
+    eprintln!("error: {e}");
+    ExitCode::from(1)
 }
 
 fn find_relation<'h>(

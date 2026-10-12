@@ -144,11 +144,17 @@ fn lower(e: &TExpr, a: &[Option<&str>; 2]) -> Expr {
                 WinFunc::Count => "count",
                 WinFunc::Max => "max",
                 WinFunc::Min => "min",
-                WinFunc::Lead => "lead",
+                WinFunc::Lead(_) => "lead",
+                WinFunc::Lag(_) => "lag",
+                WinFunc::Sum | WinFunc::RunningSum => "sum",
+                WinFunc::Mean => "avg",
             };
             let call = Expr::Func {
                 name: name.into(),
                 args: match (f, arg) {
+                    (WinFunc::Lag(n) | WinFunc::Lead(n), Some(x)) if *n != 1 => {
+                        vec![l(x), sql::int(*n as i64)]
+                    }
                     (_, Some(x)) => vec![l(x)],
                     (WinFunc::Count, None) => vec![Expr::Star { table: None }],
                     _ => Vec::new(),
@@ -156,7 +162,7 @@ fn lower(e: &TExpr, a: &[Option<&str>; 2]) -> Expr {
                 distinct: false,
                 filter: filter.as_ref().map(|x| Box::new(l(x))),
             };
-            Expr::Window {
+            let window = Expr::Window {
                 func: Box::new(call),
                 partition: args(partition),
                 order: order
@@ -166,6 +172,27 @@ fn lower(e: &TExpr, a: &[Option<&str>; 2]) -> Expr {
                         desc: o.desc,
                     })
                     .collect(),
+                frame: match f {
+                    WinFunc::RunningSum => Some("ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"),
+                    _ => None,
+                },
+            };
+            // DuckDB widens integer sums to HUGEINT and decimal sums to DECIMAL(38, s); keep the
+            // MAGI type, as the `sum` aggregate does.
+            let cast = match (f, e.ty.ty) {
+                (WinFunc::Sum | WinFunc::RunningSum, Type::Int) => Some("BIGINT".to_string()),
+                (WinFunc::Sum | WinFunc::RunningSum, Type::Decimal(p, s)) => {
+                    Some(format!("DECIMAL({p},{s})"))
+                }
+                _ => None,
+            };
+            match cast {
+                Some(ty) => Expr::Cast {
+                    expr: Box::new(window),
+                    ty,
+                    try_: false,
+                },
+                None => window,
             }
         }
         TExprKind::Call {
@@ -478,6 +505,8 @@ impl Builder {
                     JoinType::Left => ("LEFT JOIN", Self::items(output, JOINED)),
                     JoinType::Right => ("RIGHT JOIN", Self::items(output, JOINED)),
                     JoinType::Full => ("FULL JOIN", Self::items(output, JOINED)),
+                    JoinType::Asof => ("ASOF JOIN", Self::items(output, JOINED)),
+                    JoinType::AsofLeft => ("ASOF LEFT JOIN", Self::items(output, JOINED)),
                     JoinType::Semi => (
                         "SEMI JOIN",
                         vec![(

@@ -77,6 +77,8 @@ const STEPS: &[&str] = &[
     "union",
     "limit",
     "normalize",
+    "window",
+    "asof",
 ];
 
 /// Words that continue a statement, clause or step on its line.
@@ -94,6 +96,8 @@ const CONTINUATIONS: &[&str] = &[
     "desc",
     "none",
     "unique",
+    "partition",
+    "order",
 ];
 
 /// Operator words, keywords wherever an expression can be.
@@ -149,7 +153,9 @@ pub fn tokens(text: &str) -> Vec<SemanticToken> {
                         || OPERATORS.contains(&w)
                         || (w == "case" && next == Some(&Tok::LBrace))
                         || (w == "otherwise" && next == Some(&Tok::FatArrow))
-                        || (w == "original" && prev == Some(&Tok::FatArrow));
+                        || (w == "original" && prev == Some(&Tok::FatArrow))
+                        || (w == "left"
+                            && matches!(prev, Some(Tok::Ident { name, quoted: false }) if name == "asof"));
                     line_keyword |= keyword;
                     keyword.then_some(KEYWORD)
                 }

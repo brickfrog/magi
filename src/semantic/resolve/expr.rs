@@ -100,6 +100,11 @@ pub enum AggMode {
         grouped: [bool; 2],
         keys: [Vec<String>; 2],
     },
+    /// A `window` step: window functions and partition aggregates over these keys.
+    Window {
+        partition: Vec<TExpr>,
+        order: Vec<OrderKey>,
+    },
 }
 
 impl<'a> Analyzer<'a> {
@@ -863,6 +868,21 @@ impl<'a> Analyzer<'a> {
             _ => {}
         }
 
+        if matches!(mode, AggMode::Window { .. })
+            && (functions::is_window(fname) || functions::is_aggregate(fname))
+        {
+            return self.window_call(e, fname, args, scope, mode, in_agg);
+        }
+        if functions::is_window(fname) {
+            self.err(
+                Diagnostic::error("M125", format!("`{fname}` is a window function"))
+                    .label(e.span, "only allowed in a `window` step")
+                    .help(format!(
+                        "compute it in a window step: `|> window order by ... {{ x = {fname}(...) }}`, then use `x`"
+                    )),
+            );
+            return None;
+        }
         let is_agg = functions::is_aggregate(fname);
         if is_agg {
             if let Some(_outer) = in_agg {
@@ -1013,14 +1033,8 @@ impl<'a> Analyzer<'a> {
         let types: Vec<ColType> = targs.iter().map(|t| t.ty).collect();
         match functions::resolve(fname, &types) {
             Ok(Resolved::Agg(func, ty)) => {
-                if matches!(func, AggFunc::Sum | AggFunc::Mean)
-                    && targs.first().is_some_and(|a| a.ty.ty == Type::Float)
-                {
-                    self.err(
-                        Diagnostic::warning("M122", format!("`{fname}` over float values can differ in the last digits between runs"))
-                            .label(e.span, "parallel summation order is not fixed")
-                            .help("use a decimal column (declare `decimal(p, s)` or `to_decimal(x, p, s)`) for reproducible totals"),
-                    );
+                if matches!(func, AggFunc::Sum | AggFunc::Mean) {
+                    self.float_sum_warning(fname, targs.first(), e.span);
                 }
                 Some(TExpr::new(
                     TExprKind::Agg {
@@ -1037,6 +1051,175 @@ impl<'a> Analyzer<'a> {
                 None
             }
         }
+    }
+
+    /// M122: a sum or mean over floats depends on the summation order.
+    fn float_sum_warning(&mut self, fname: &str, arg: Option<&TExpr>, span: Span) {
+        if arg.is_some_and(|a| a.ty.ty == Type::Float) {
+            self.err(
+                Diagnostic::warning("M122", format!("`{fname}` over float values can differ in the last digits between runs"))
+                    .label(span, "parallel summation order is not fixed")
+                    .help("use a decimal column (declare `decimal(p, s)` or `to_decimal(x, p, s)`) for reproducible totals"),
+            );
+        }
+    }
+
+    /// A window function or partition aggregate inside a `window` step.
+    fn window_call(
+        &mut self,
+        e: &ast::Expr,
+        fname: &str,
+        args: &[ast::Expr],
+        scope: &Scope,
+        mode: &AggMode,
+        in_agg: Option<u8>,
+    ) -> Option<TExpr> {
+        let AggMode::Window { partition, order } = mode else {
+            unreachable!("window functions are typed in window mode only")
+        };
+        if in_agg.is_some() {
+            self.err(
+                Diagnostic::error("M126", "window functions and aggregates cannot be nested")
+                    .label(e.span, "inside another window function or aggregate"),
+            );
+            return None;
+        }
+        let mut targs = Vec::new();
+        for a in args {
+            targs.push(self.ex(a, scope, mode, Some(0))?);
+        }
+        let arity_error = |this: &mut Self, message: String| {
+            this.err(Diagnostic::error("M108", message).label(e.span, "here"));
+        };
+        let (func, ty) = match fname {
+            "row_number" | "rank" | "dense_rank" => {
+                if !targs.is_empty() {
+                    arity_error(self, format!("`{fname}` takes no arguments"));
+                    return None;
+                }
+                let func = match fname {
+                    "row_number" => WinFunc::RowNumber,
+                    "rank" => WinFunc::Rank,
+                    _ => WinFunc::DenseRank,
+                };
+                (func, ColType::required(Type::Int))
+            }
+            "lag" | "lead" => {
+                if !(1..=2).contains(&targs.len()) {
+                    arity_error(
+                        self,
+                        format!("`{fname}` takes a value and an optional number of rows"),
+                    );
+                    return None;
+                }
+                let n = match args.get(1).map(|a| (&a.kind, a.span)) {
+                    None => 1,
+                    Some((ExprKind::Literal(Literal::Int(n)), _)) if *n >= 1 => *n as u64,
+                    Some((_, span)) => {
+                        self.err(
+                            Diagnostic::error(
+                                "M126",
+                                format!("the offset of `{fname}` must be a whole number of rows, 1 or more"),
+                            )
+                            .label(span, "expected e.g. `2`"),
+                        );
+                        return None;
+                    }
+                };
+                targs.truncate(1);
+                let func = if fname == "lag" {
+                    WinFunc::Lag(n)
+                } else {
+                    WinFunc::Lead(n)
+                };
+                (func, ColType::nullable(targs[0].ty.ty))
+            }
+            "running_sum" => {
+                if targs.len() != 1 {
+                    arity_error(self, "`running_sum` takes one argument".into());
+                    return None;
+                }
+                match functions::resolve("sum", &[targs[0].ty]) {
+                    Ok(Resolved::Agg(_, ty)) => {
+                        (WinFunc::RunningSum, ty.with_nullable(targs[0].ty.nullable))
+                    }
+                    Ok(Resolved::Scalar(..)) => unreachable!("`sum` is an aggregate"),
+                    Err(fe) => {
+                        let span = fe.arg.and_then(|i| args.get(i)).map_or(e.span, |a| a.span);
+                        self.err(Diagnostic::error("M108", fe.message).label(span, "here"));
+                        return None;
+                    }
+                }
+            }
+            _ => {
+                let types: Vec<ColType> = targs.iter().map(|t| t.ty).collect();
+                match functions::resolve(fname, &types) {
+                    Ok(Resolved::Agg(f, ty)) => {
+                        let func = match f {
+                            AggFunc::Sum => WinFunc::Sum,
+                            AggFunc::Mean => WinFunc::Mean,
+                            AggFunc::Min => WinFunc::Min,
+                            AggFunc::Max => WinFunc::Max,
+                            AggFunc::Count => WinFunc::Count,
+                            AggFunc::CountDistinct
+                            | AggFunc::Missing
+                            | AggFunc::Any
+                            | AggFunc::All => {
+                                self.err(
+                                    Diagnostic::error(
+                                        "M126",
+                                        format!("`{fname}` cannot be computed over a window"),
+                                    )
+                                    .label(e.span, "not available in a `window` step")
+                                    .help("aggregate with `group by ... |> aggregate { ... }` and join the result back"),
+                                );
+                                return None;
+                            }
+                        };
+                        (func, ty)
+                    }
+                    Ok(Resolved::Scalar(..)) => unreachable!("aggregates resolve to `Agg`"),
+                    Err(fe) => {
+                        let span = fe.arg.and_then(|i| args.get(i)).map_or(e.span, |a| a.span);
+                        self.err(Diagnostic::error("M108", fe.message).label(span, "here"));
+                        return None;
+                    }
+                }
+            }
+        };
+        let ordered = matches!(
+            func,
+            WinFunc::RowNumber
+                | WinFunc::Rank
+                | WinFunc::DenseRank
+                | WinFunc::Lag(_)
+                | WinFunc::Lead(_)
+                | WinFunc::RunningSum
+        );
+        if ordered && order.is_empty() {
+            self.err(
+                Diagnostic::error(
+                    "M126",
+                    format!("`{fname}` needs `order by` in the window step"),
+                )
+                .label(e.span, "rows have no order here")
+                .help("e.g. `|> window order by day { ... }`"),
+            );
+            return None;
+        }
+        if matches!(func, WinFunc::Sum | WinFunc::Mean | WinFunc::RunningSum) {
+            self.float_sum_warning(fname, targs.first(), e.span);
+        }
+        Some(TExpr::new(
+            TExprKind::Window {
+                func,
+                arg: targs.into_iter().next().map(Box::new),
+                partition: partition.clone(),
+                order: if ordered { order.clone() } else { Vec::new() },
+                filter: None,
+            },
+            ty,
+        ))
     }
 
     /// `CASE WHEN input IN (...) THEN value ... ELSE otherwise END` for a mapping.

@@ -1,0 +1,37 @@
+source rates = csv("rates.csv") {
+    identity [currency, day]
+    schema {
+        currency: string
+        day: date
+        rate: decimal(10, 2)
+    }
+}
+
+source receipts = csv("receipts.csv") {
+    identity ref
+    schema {
+        ref: string
+        currency: string
+        day: date
+        amount: decimal(10, 2)
+    }
+}
+
+dataset converted = receipts
+    |> asof left join rates on receipts.currency == rates.currency and receipts.day >= rates.day
+    |> select {
+        ref
+        rate_day = rates.day
+        rate
+    }
+
+dataset matched = receipts
+    |> asof join rates on receipts.currency == rates.currency and receipts.day >= rates.day
+    |> select {
+        ref
+        rate_day = rates.day
+        rate
+    }
+
+export converted to "out/converted.csv"
+export matched to "out/matched.csv"

@@ -59,6 +59,8 @@ pub enum Expr {
         func: Box<Expr>,
         partition: Vec<Expr>,
         order: Vec<OrderBy>,
+        /// Frame clause, e.g. `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`.
+        frame: Option<&'static str>,
     },
     /// DuckDB list literal `[a, b]`.
     List(Vec<Expr>),
@@ -411,6 +413,7 @@ fn expr_into(out: &mut String, e: &Expr) {
             func,
             partition,
             order,
+            frame,
         } => {
             expr_into(out, func);
             out.push_str(" OVER (");
@@ -424,6 +427,12 @@ fn expr_into(out: &mut String, e: &Expr) {
                 }
                 out.push_str("ORDER BY ");
                 order_list(out, order);
+            }
+            if let Some(f) = frame {
+                if !partition.is_empty() || !order.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(f);
             }
             out.push(')');
         }

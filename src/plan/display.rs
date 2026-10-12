@@ -89,9 +89,19 @@ fn render(e: &TExpr, p: &[&str]) -> String {
                 WinFunc::Count => "count",
                 WinFunc::Max => "max",
                 WinFunc::Min => "min",
-                WinFunc::Lead => "lead",
+                WinFunc::Lead(_) => "lead",
+                WinFunc::Lag(_) => "lag",
+                WinFunc::Sum => "sum",
+                WinFunc::Mean => "mean",
+                WinFunc::RunningSum => "running_sum",
             };
-            let mut s = format!("{name}({})", arg.as_ref().map(|a| r(a)).unwrap_or_default());
+            let mut s = format!("{name}({}", arg.as_ref().map(|a| r(a)).unwrap_or_default());
+            if let WinFunc::Lag(n) | WinFunc::Lead(n) = func
+                && *n != 1
+            {
+                s += &format!(", {n}");
+            }
+            s += ")";
             if let Some(f) = filter {
                 s += &format!(" filter ({})", r(f));
             }

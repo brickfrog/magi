@@ -872,6 +872,7 @@ impl Formatter<'_> {
                     mapping: MappingRef::Inline(_),
                     ..
                 }
+                | StepKind::Window { .. }
         );
         if !text.text.is_empty()
             && (!has_block || (!self.has_pending(span.start, span.end) && self.fits(&text.text)))
@@ -890,14 +891,22 @@ impl Formatter<'_> {
                 format!("|> normalize {}", column_name(column)),
                 self.arm_items(arms),
             ),
+            StepKind::Window {
+                partition,
+                order,
+                assigns,
+            } => (
+                format!("|> {}", self.window_header(partition, order)),
+                assigns.iter().map(Item::Assign).collect(),
+            ),
             _ => unreachable!("steps without a block form are always inline"),
         };
         self.braced(header.into(), &items, span, limit, false, false);
     }
 
     /// `|> step` on one line, for steps that have a one-line form: every step except
-    /// `aggregate`, inline `normalize` mappings, multi-assignment `derive`, `select` mixing
-    /// several items with assignments, and empty `{}` forms.
+    /// `aggregate`, inline `normalize` mappings, multi-assignment `derive` and `window`, `select`
+    /// mixing several items with assignments, and empty `{}` forms.
     fn step_inline(&self, kind: &StepKind) -> Option<String> {
         let body = match kind {
             StepKind::Derive(a) if a.len() == 1 => format!("derive {}", self.assign(&a[0])),
@@ -932,6 +941,8 @@ impl Formatter<'_> {
                     JoinKind::Left => "left join",
                     JoinKind::Right => "right join",
                     JoinKind::Full => "full join",
+                    JoinKind::Asof => "asof join",
+                    JoinKind::AsofLeft => "asof left join",
                 };
                 let alias = alias
                     .as_ref()
@@ -963,8 +974,33 @@ impl Formatter<'_> {
             } => {
                 format!("normalize {} with {}", column_name(column), ident(name))
             }
+            StepKind::Window {
+                partition,
+                order,
+                assigns,
+            } if assigns.len() == 1 => format!(
+                "{} {{ {} }}",
+                self.window_header(partition, order),
+                self.assign(&assigns[0])
+            ),
+            StepKind::Window { .. } => return None,
         };
         Some(format!("|> {body}"))
+    }
+
+    /// `window partition by ... order by ...`, without the columns block.
+    fn window_header(&self, partition: &[Expr], order: &[SortKey]) -> String {
+        let mut s = String::from("window");
+        if !partition.is_empty() {
+            s += &format!(
+                " partition by {}",
+                join(partition.iter().map(|k| self.expr(k)))
+            );
+        }
+        if !order.is_empty() {
+            s += &format!(" order by {}", self.sort_keys(order));
+        }
+        s
     }
 
     // ---- clause pieces ------------------------------------------------------------------------
@@ -1511,6 +1547,10 @@ dataset cleaned = cases
     |> left join more on a, b
     |> right join other as o on o.id == id
     |> full join other on o.id == id
+    |> asof left join rates on receipts.currency == rates.currency and receipts.day >= rates.day
+    |> asof join rates as r on r.day <= day
+    |> window partition by acct order by row_no { n = row_number()  previous = lag(balance) }
+    |> window order by score desc { r = rank() }
     |> group by category, lower(region)
     |> aggregate total = sum(amt), n = count()
     |> sort by total desc, category asc
@@ -1734,6 +1774,10 @@ test nothing {}
             "        x = a,",
             "        and = 1",
             "    |> join lookups as l on l.code == category and l.active",
+            "    |> asof left join rates on receipts.currency == rates.currency and receipts.day >= rates.day",
+            "    |> asof join rates as r on r.day <= day",
+            "    |> window partition by acct order by row_no {\n        n = row_number()\n        previous = lag(balance)\n    }",
+            "    |> window order by score desc { r = rank() }",
             "    |> sort total desc, category",
             "    |> sort by by desc, `by`",
             "    |> normalize category {}",

@@ -6,6 +6,7 @@ mod cli;
 mod diagnostic;
 mod export;
 mod fmt;
+mod inspect;
 mod lineage;
 mod lsp;
 mod plan;

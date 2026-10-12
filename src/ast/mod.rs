@@ -205,6 +205,10 @@ pub enum JoinKind {
     Left,
     Right,
     Full,
+    /// `asof join`: each left row takes the nearest right row by the condition's inequality.
+    Asof,
+    /// `asof left join`: as `asof join`, keeping left rows without a right row.
+    AsofLeft,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -270,6 +274,12 @@ pub enum StepKind {
     Normalize {
         column: ColumnName,
         mapping: MappingRef,
+    },
+    /// `window [partition by k, ...] [order by k [desc], ...] { name = expr ... }`
+    Window {
+        partition: Vec<Expr>,
+        order: Vec<SortKey>,
+        assigns: Vec<Assign>,
     },
 }
 

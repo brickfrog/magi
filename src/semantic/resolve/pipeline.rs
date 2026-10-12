@@ -369,6 +369,7 @@ impl<'a> Analyzer<'a> {
         // result without `schema`) would silently disappear.
         let keeps_columns = match &step.kind {
             StepKind::Derive(_) => Some("derive"),
+            StepKind::Window { .. } => Some("window"),
             StepKind::Drop(_) => Some("drop"),
             StepKind::Rename(_) => Some("rename"),
             StepKind::Normalize { .. } => Some("normalize"),
@@ -715,6 +716,117 @@ impl<'a> Analyzer<'a> {
                 st.sort = Some(phys_keys);
                 st.plan = std::mem::replace(&mut st.plan, LogicalPlan::scan("")).sort(out);
             }
+            StepKind::Window {
+                partition,
+                order,
+                assigns,
+            } => {
+                if assigns.is_empty() {
+                    self.err(
+                        Diagnostic::error("M126", "a `window` step computes at least one column")
+                            .label(step.span, "no columns"),
+                    );
+                    return None;
+                }
+                let mut keys = Vec::new();
+                for k in partition {
+                    let ExprKind::Column(c) = &k.kind else {
+                        self.err(
+                            Diagnostic::error("M126", "`partition by` takes column names")
+                                .label(k.span, "expression")
+                                .help("derive the value first"),
+                        );
+                        return None;
+                    };
+                    let sc = self.lookup(c, &st.scope)?;
+                    keys.push(TExpr::col(0, sc.phys, sc.ty));
+                }
+                let mut user = Vec::new();
+                for k in order {
+                    let ExprKind::Column(c) = &k.expr.kind else {
+                        self.err(
+                            Diagnostic::error("M126", "`order by` takes column names")
+                                .label(k.expr.span, "expression")
+                                .help("derive the value first"),
+                        );
+                        return None;
+                    };
+                    let sc = self.lookup(c, &st.scope)?;
+                    user.push(OrderKey {
+                        expr: TExpr::col(0, sc.phys, sc.ty),
+                        desc: k.desc,
+                    });
+                }
+                // every other column breaks ties, as in `sort`, so row-by-row results are
+                // reproducible; `rank` and `dense_rank` keep the user's keys so ties tie
+                let mut total = user.clone();
+                for c in &st.scope.cols {
+                    if !user.iter().any(|k| {
+                        matches!(&k.expr.kind, TExprKind::Column { name, .. } if name == &c.phys)
+                    }) {
+                        total.push(OrderKey {
+                            expr: TExpr::col(0, c.phys.clone(), c.ty),
+                            desc: false,
+                        });
+                    }
+                }
+                let mode = AggMode::Window {
+                    partition: keys,
+                    order: user,
+                };
+                let mut batch: Vec<(String, TExpr, LineageId, Span)> = Vec::new();
+                for a in assigns {
+                    if batch.iter().any(|(b, ..)| b == &a.name.name) {
+                        self.err(
+                            Diagnostic::error(
+                                "M003",
+                                format!("`{}` is computed twice in one step", a.name.name),
+                            )
+                            .label(a.name.span, "duplicate"),
+                        );
+                        return None;
+                    }
+                    if !self.not_reserved(&a.name) {
+                        return None;
+                    }
+                    if referenced_names(&a.expr)
+                        .iter()
+                        .any(|n| batch.iter().any(|(b, ..)| b == n))
+                    {
+                        self.err(
+                            Diagnostic::error(
+                                "M126",
+                                "the columns of one `window` step cannot refer to each other",
+                            )
+                            .label(a.expr.span, "uses a column computed in this step")
+                            .help("add a `derive` step after the window step"),
+                        );
+                        return None;
+                    }
+                    let t = self.expr(&a.expr, &st.scope, &mode)?;
+                    let deps = self.deps(&t, &st.scope);
+                    let lineage = self.hir.lineage.add(
+                        format!("{dataset}: {} = {}", a.name.name, self.text(a.expr.span)),
+                        deps,
+                    );
+                    let t = t.transform(&mut |mut x| {
+                        if let TExprKind::Window { func, order, .. } = &mut x.kind
+                            && matches!(
+                                func,
+                                WinFunc::RowNumber
+                                    | WinFunc::Lag(_)
+                                    | WinFunc::Lead(_)
+                                    | WinFunc::RunningSum
+                            )
+                        {
+                            *order = total.clone();
+                        }
+                        x
+                    });
+                    batch.push((a.name.name.clone(), t, lineage, a.name.span));
+                }
+                self.flush_derive(st, batch)?;
+            }
             StepKind::Distinct => {
                 st.plan = std::mem::replace(&mut st.plan, LogicalPlan::scan("")).distinct();
                 st.sort = None;
@@ -989,6 +1101,7 @@ impl<'a> Analyzer<'a> {
         dataset: &str,
     ) -> Option<()> {
         let r = self.rel_ref(rel)?;
+        let asof = matches!(kind, ast::JoinKind::Asof | ast::JoinKind::AsofLeft);
         let right_rel = self.relation(r).clone();
         st.uses.push(right_rel.name.clone());
         let qualifier = alias.map_or_else(
@@ -1029,6 +1142,16 @@ impl<'a> Analyzer<'a> {
         combined.open.extend(right.open.iter().cloned());
 
         let (cond, merged_keys) = match on {
+            JoinOn::Keys(_) if asof => {
+                self.err(
+                    Diagnostic::error("M127", "`asof join` needs a condition with one inequality")
+                        .label(rel.span, "joined on equal keys only")
+                        .help(format!(
+                            "e.g. `on x.currency == {qualifier}.currency and x.day >= {qualifier}.day`"
+                        )),
+                );
+                return None;
+            }
             JoinOn::Keys(keys) => {
                 let mut cond: Option<TExpr> = None;
                 let mut merged = Vec::new();
@@ -1081,6 +1204,9 @@ impl<'a> Analyzer<'a> {
                 if !self.expect_bool(&t, e.span, "a join condition") {
                     return None;
                 }
+                if asof {
+                    self.asof_condition(&t, e.span, &right_rel, &qualifier)?;
+                }
                 // `on true` is an explicit cross join; any other condition that never looks at
                 // the joined relation is probably a mistake
                 let explicit_cross = matches!(t.kind, TExprKind::Literal(Lit::Bool(true)));
@@ -1103,9 +1229,11 @@ impl<'a> Analyzer<'a> {
             ast::JoinKind::Left => JoinType::Left,
             ast::JoinKind::Right => JoinType::Right,
             ast::JoinKind::Full => JoinType::Full,
+            ast::JoinKind::Asof => JoinType::Asof,
+            ast::JoinKind::AsofLeft => JoinType::AsofLeft,
         };
         let (left_nullable, right_nullable) = match jt {
-            JoinType::Left => (false, true),
+            JoinType::Left | JoinType::AsofLeft => (false, true),
             JoinType::Right => (true, false),
             JoinType::Full => (true, true),
             _ => (false, false),
@@ -1214,6 +1342,19 @@ impl<'a> Analyzer<'a> {
             used.push(phys.clone());
             c.phys = phys;
         }
+        // an asof join keeps one row per left row, so the left identity still holds
+        let identity = match &st.identity {
+            Some(ids) if asof => ids
+                .iter()
+                .map(|id| {
+                    snapshot[..st.scope.cols.len()]
+                        .iter()
+                        .position(|p| p == id)
+                        .map(|i| out_cols[i].0.phys.clone())
+                })
+                .collect(),
+            _ => None,
+        };
         let output: Vec<(TExpr, String)> = out_cols
             .iter()
             .map(|(c, e)| (e.clone(), c.phys.clone()))
@@ -1233,8 +1374,102 @@ impl<'a> Analyzer<'a> {
             output,
         );
         st.scope = new;
-        st.identity = None;
+        st.identity = identity;
         st.sort = None;
+        Some(())
+    }
+
+    /// An `asof join` condition: conjuncts that each compare the pipeline's columns with one
+    /// column of the joined relation, exactly one of them an inequality, and equalities plus the
+    /// inequality covering an identity of the joined relation so the nearest row is unique.
+    fn asof_condition(
+        &mut self,
+        t: &TExpr,
+        span: Span,
+        right_rel: &Relation,
+        qualifier: &str,
+    ) -> Option<()> {
+        fn conjuncts<'t>(e: &'t TExpr, out: &mut Vec<&'t TExpr>) {
+            match &e.kind {
+                TExprKind::Binary {
+                    op: BinaryOp::And,
+                    left,
+                    right,
+                } => {
+                    conjuncts(left, out);
+                    conjuncts(right, out);
+                }
+                _ => out.push(e),
+            }
+        }
+        let mut parts = Vec::new();
+        conjuncts(t, &mut parts);
+        let mut right_cols: Vec<String> = Vec::new();
+        let mut inequalities = 0;
+        for p in parts {
+            let shape = match &p.kind {
+                TExprKind::Binary {
+                    op:
+                        op @ (BinaryOp::Eq | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge),
+                    left,
+                    right,
+                } => {
+                    let side = |col: &TExpr, other: &TExpr| match &col.kind {
+                        TExprKind::Column { slot: 1, name }
+                            if other.columns_of(1).is_empty()
+                                && !other.columns_of(0).is_empty() =>
+                        {
+                            Some(name.clone())
+                        }
+                        _ => None,
+                    };
+                    side(right, left)
+                        .or_else(|| side(left, right))
+                        .map(|name| (name, *op != BinaryOp::Eq))
+                }
+                _ => None,
+            };
+            let Some((name, inequality)) = shape else {
+                self.err(
+                    Diagnostic::error(
+                        "M127",
+                        format!("each condition of an `asof join` compares the pipeline's columns with one column of `{qualifier}`"),
+                    )
+                    .label(span, "unsupported condition"),
+                );
+                return None;
+            };
+            right_cols.push(name);
+            inequalities += usize::from(inequality);
+        }
+        if inequalities != 1 {
+            self.err(
+                Diagnostic::error(
+                    "M127",
+                    "`asof join` needs exactly one of `>=`, `>`, `<=`, `<`",
+                )
+                .label(span, format!("{inequalities} inequalities")),
+            );
+            return None;
+        }
+        let covered = right_rel.identity.as_ref().is_some_and(|ids| {
+            ids.iter()
+                .all(|id| right_cols.iter().any(|c| c.eq_ignore_ascii_case(id)))
+        });
+        if !covered {
+            self.err(
+                Diagnostic::error(
+                    "M128",
+                    format!("`asof join` could pick any of several `{qualifier}` rows"),
+                )
+                .label(span, "no identity of the joined relation is covered by this condition")
+                .help(format!(
+                    "declare `identity [..]` on `{}` over the condition's columns, or make it one row per key with `group by ... |> aggregate {{ ... }}`",
+                    right_rel.name
+                )),
+            );
+            return None;
+        }
         Some(())
     }
 }

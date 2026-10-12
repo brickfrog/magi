@@ -77,7 +77,7 @@ pub fn list(
     Ok(())
 }
 
-fn csv_field(v: &str) -> String {
+pub fn csv_field(v: &str) -> String {
     let quote = v.is_empty() || v.trim() != v || v.contains([',', '"', '\n', '\r']);
     if quote {
         format!("\"{}\"", v.replace('"', "\"\""))

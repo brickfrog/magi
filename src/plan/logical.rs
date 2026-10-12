@@ -15,6 +15,10 @@ pub enum JoinType {
     Semi,
     /// Keep left rows that have no match (no right columns).
     Anti,
+    /// Each left row with the nearest right row by the condition's one inequality.
+    Asof,
+    /// As `Asof`, keeping left rows without a right row.
+    AsofLeft,
 }
 
 impl JoinType {
@@ -26,6 +30,8 @@ impl JoinType {
             JoinType::Full => "full",
             JoinType::Semi => "semi",
             JoinType::Anti => "anti",
+            JoinType::Asof => "asof",
+            JoinType::AsofLeft => "asof left",
         }
     }
 }

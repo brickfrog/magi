@@ -696,14 +696,22 @@ impl Parser {
                 self.bump();
                 StepKind::Filter(self.expr()?)
             }
-            "join" | "left" | "right" | "full" | "inner" => {
+            "join" | "left" | "right" | "full" | "inner" | "asof" => {
                 let kind = match word.as_str() {
                     "left" => JoinKind::Left,
                     "right" => JoinKind::Right,
                     "full" => JoinKind::Full,
+                    "asof" => {
+                        self.bump();
+                        if self.eat_word("left") {
+                            JoinKind::AsofLeft
+                        } else {
+                            JoinKind::Asof
+                        }
+                    }
                     _ => JoinKind::Inner,
                 };
-                if word != "join" {
+                if !matches!(word.as_str(), "join" | "asof") {
                     self.bump();
                 }
                 self.expect_word("join")?;
@@ -779,6 +787,32 @@ impl Parser {
                 };
                 StepKind::Normalize { column, mapping }
             }
+            "window" => {
+                self.bump();
+                let mut partition = Vec::new();
+                if self.at_word("partition") && self.word_at(1) == Some("by") {
+                    self.bump();
+                    self.bump();
+                    partition.push(self.expr()?);
+                    while self.eat(&Tok::Comma) {
+                        partition.push(self.expr()?);
+                    }
+                }
+                let mut order = Vec::new();
+                if self.at_word("order") && self.word_at(1) == Some("by") {
+                    self.bump();
+                    self.bump();
+                    order = self.sort_keys()?;
+                }
+                if !self.at(&Tok::LBrace) {
+                    return Err(self.unexpected("`{` with the window's columns"));
+                }
+                StepKind::Window {
+                    partition,
+                    order,
+                    assigns: self.assignments()?,
+                }
+            }
             _ => {
                 const STEPS: &[&str] = &[
                     "select",
@@ -794,6 +828,8 @@ impl Parser {
                     "union",
                     "limit",
                     "normalize",
+                    "window",
+                    "asof",
                 ];
                 let mut d = self.unexpected("a pipeline step (`filter`, `derive`, `join`, ...)");
                 if let Some(s) = crate::diagnostic::did_you_mean(&word, STEPS.iter().copied()) {
@@ -1793,6 +1829,20 @@ export r.matches to "m.csv""#,
         assert_eq!(
             p.diagnostics[0].help.as_deref(),
             Some("did you mean `filter`?")
+        );
+    }
+
+    #[test]
+    fn window_columns_need_braces() {
+        let p = parse(0, "dataset x = a |> window order by x n = row_number()");
+        assert_eq!(p.diagnostics.len(), 1, "{:?}", p.diagnostics);
+        assert_eq!(p.diagnostics[0].code, "M001");
+        assert!(
+            p.diagnostics[0]
+                .message
+                .contains("`{` with the window's columns"),
+            "{}",
+            p.diagnostics[0].message
         );
     }
 

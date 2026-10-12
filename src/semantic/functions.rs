@@ -88,7 +88,27 @@ pub const ALL: &[&str] = &[
     "missing",
     "any",
     "all",
+    "row_number",
+    "rank",
+    "dense_rank",
+    "lag",
+    "lead",
+    "running_sum",
 ];
+
+/// Functions over neighbouring rows, allowed only in a `window` step.
+pub const WINDOW: &[&str] = &[
+    "row_number",
+    "rank",
+    "dense_rank",
+    "lag",
+    "lead",
+    "running_sum",
+];
+
+pub fn is_window(name: &str) -> bool {
+    WINDOW.contains(&name)
+}
 
 pub fn is_aggregate(name: &str) -> bool {
     matches!(

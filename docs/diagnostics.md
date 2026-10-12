@@ -58,9 +58,13 @@ they name rows, cells and counts instead.
 | M119 | error | `union` inputs have different columns or incompatible types. |
 | M120 | error | The same relation is joined twice without an alias. |
 | M121 | warning | A join condition does not mention the joined relation (`on true` is exempt: it is an explicit cross join). |
-| M122 | warning | `sum` / `mean` over float values: the parallel summation order is not fixed, so the last digits can differ between runs. Use decimals. |
+| M122 | warning | `sum` / `mean` / `running_sum` over float values (also in a `window` step): the parallel summation order is not fixed, so the last digits can differ between runs. Use decimals. |
 | M123 | warning | A `duckdb.*` function returns different values on every call (e.g. `random`), or depends on when the run happens (e.g. `now`, `current_date`; `--today` does not pin it, use `today()`); results depending on it are not reproducible. |
-| M124 | error | `derive`, `drop`, `rename`, `normalize`, `join` or `union` over a `native_sql` result without `schema`: its columns are unknown and would be dropped. Declare a `schema { ... }` or `select` the columns first. |
+| M124 | error | `derive`, `window`, `drop`, `rename`, `normalize`, `join` or `union` over a `native_sql` result without `schema`: its columns are unknown and would be dropped. Declare a `schema { ... }` or `select` the columns first. |
+| M125 | error | A window function (`row_number`, `rank`, `dense_rank`, `lag`, `lead`, `running_sum`) outside a `window` step. |
+| M126 | error | Invalid `window` step: no columns, `partition by` / `order by` an expression, an ordered function without `order by`, columns of the step that refer to each other, nested window functions or aggregates, a `lag` / `lead` offset that is not a whole number of rows of 1 or more, or an aggregate that cannot be computed over a window (`count_distinct`, `missing`, `any`, `all`). |
+| M127 | error | Invalid `asof join` condition: joined on keys only, a condition that does not compare the pipeline's columns with one column of the joined relation, or not exactly one inequality (`>=`, `>`, `<=`, `<`). |
+| M128 | error | An `asof join` condition does not cover an `identity` of the joined relation, so the nearest row could be any of several rows. |
 
 ## Sources
 
