@@ -96,8 +96,6 @@ const CONTINUATIONS: &[&str] = &[
     "desc",
     "none",
     "unique",
-    "partition",
-    "order",
 ];
 
 /// Operator words, keywords wherever an expression can be.
@@ -155,7 +153,11 @@ pub fn tokens(text: &str) -> Vec<SemanticToken> {
                         || (w == "otherwise" && next == Some(&Tok::FatArrow))
                         || (w == "original" && prev == Some(&Tok::FatArrow))
                         || (w == "left"
-                            && matches!(prev, Some(Tok::Ident { name, quoted: false }) if name == "asof"));
+                            && matches!(prev, Some(Tok::Ident { name, quoted: false }) if name == "asof"))
+                        // `window partition by` / `order by`; elsewhere they are column names
+                        || (line_keyword
+                            && matches!(w, "partition" | "order")
+                            && matches!(next, Some(Tok::Ident { name, quoted: false }) if name == "by"));
                     line_keyword |= keyword;
                     keyword.then_some(KEYWORD)
                 }
@@ -247,6 +249,41 @@ mod tests {
                 (1, 0, 6, KEYWORD),
                 (1, 18, 9, STRING),
                 (2, 0, 6, STRING),
+            ]
+        );
+    }
+
+    /// The text of every keyword token, line by line.
+    fn keywords(text: &str) -> Vec<String> {
+        let lines: Vec<&str> = text.lines().collect();
+        decoded(text)
+            .into_iter()
+            .filter(|t| t.3 == KEYWORD)
+            .map(|(line, col, len, _)| {
+                lines[line as usize][col as usize..(col + len) as usize].to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn window_and_asof_words_are_keywords_only_in_their_steps() {
+        let text = "dataset d = a\n    |> window partition by acct order by day { n = row_number() }\n    |> asof left join r on r.k == k and day >= r.day\n    |> filter order > left\n    |> sort partition\n";
+        assert_eq!(
+            keywords(text),
+            [
+                "dataset",
+                "window",
+                "partition",
+                "by",
+                "order",
+                "by",
+                "asof",
+                "left",
+                "join",
+                "on",
+                "and",
+                "filter",
+                "sort"
             ]
         );
     }
