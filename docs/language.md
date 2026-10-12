@@ -280,6 +280,7 @@ Operators: `+ - * / %`, `== != < <= > >=`, `and or not`, `x is [not] null`, `x [
 | similarity | `similarity` (Jaro-Winkler on case/space-normalised text), `token_similarity` (word-set Jaccard), `levenshtein`; `similarity` and `token_similarity` are null when either text is blank |
 | mapping | `map(value, mapping)` |
 | aggregates | `sum mean min max count count_distinct missing any all` |
+| window (only in a `window` step) | `row_number rank dense_rank lag(x[, n]) lead(x[, n]) running_sum`, plus `sum mean avg min max count` over the whole partition |
 
 `days_between(a, b)` is the absolute number of days; `date_diff(a, b)` is signed (`b - a`).
 `parse_number` accepts `1,234.5` thousands separators and returns `decimal(38, 6)` (up to 32
