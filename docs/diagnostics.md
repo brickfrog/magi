@@ -128,6 +128,9 @@ they name rows, cells and counts instead.
 | M504 | error | Two exports write the same file (paths compared after resolving `.`, `..` and existing links). |
 | M505 | error | An output file cannot be written (no output file is changed). |
 | M506 | warning | An XLSX export wrote values as text because an Excel cell cannot hold them exactly (integers beyond ±2^53, e.g. UBIGINT/HUGEINT, decimals with more than 15 significant digits, times and timestamps finer than a millisecond); names the column and count. |
+| M507 | error | An `.svg` export names a relation or unknown name instead of a `chart`, or a chart is exported to a file that is not `.svg`. |
+| M508 | error | Invalid `chart`: missing or unknown `kind`, missing `x`/`y`, an option given twice or not for this kind (`series` on pie/waterfall, `total` off waterfall), unknown column, `y` not a number, `x`/`series` of a type that cannot be drawn, `total` not bool, `width`/`height` outside 200–4000, or a relation whose columns are not known. |
+| M509 | warning | A chart left out rows because a value it needs is null (`x`, `series`, or `y` of a pie or of a non-total waterfall bar); names the chart and count. |
 
 ## BI models
 

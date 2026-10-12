@@ -34,6 +34,7 @@ pub enum Statement {
     Export(ExportDecl),
     Runtime(RuntimeDecl),
     Model(ModelDecl),
+    Chart(ChartDecl),
     Test(TestDecl),
 }
 
@@ -50,6 +51,7 @@ impl Statement {
             Statement::Export(d) => d.span,
             Statement::Runtime(d) => d.span,
             Statement::Model(d) => d.span,
+            Statement::Chart(d) => d.span,
             Statement::Test(d) => d.span,
         }
     }
@@ -663,6 +665,15 @@ pub enum ModelItem {
 pub struct ModelDecl {
     pub name: Ident,
     pub items: Vec<ModelItem>,
+    pub span: Span,
+}
+
+/// `chart name = relation { kind: bar  x: col  y: col ... }`
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartDecl {
+    pub name: Ident,
+    pub rel: RelRef,
+    pub options: Vec<Opt>,
     pub span: Span,
 }
 

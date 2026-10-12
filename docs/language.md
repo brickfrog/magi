@@ -548,6 +548,36 @@ numbers an Excel number cannot hold exactly (integers beyond ±2^53, decimals wi
 significant digits) and times or timestamps finer than a millisecond (Excel's limit; coarser
 ones keep their milliseconds) are written as text, with warning M506.
 
+## Charts
+
+```magi
+chart defects = monthly {
+    kind: bar                 # bar | line | pie | waterfall
+    x: month
+    y: n
+    series: kind              # bar and line only: one coloured series per value
+    title: "Defects by month" # optional
+    width: 800                # optional, 200..=4000, default 600
+    height: 400               # optional, 200..=4000, default 400
+}
+chart movement = steps { kind: waterfall  x: step  y: amount  total: is_total }  # total: bool column
+export defects to "out/defects.svg"
+```
+
+A `chart` draws one relation; charts and relations share one namespace, and a chart is
+exported only to `.svg` (M507). `y` must be a number; `x` and `series` may be any type except
+json and binary. Bars, pie slices and waterfall steps follow the relation's export order (sort
+the dataset to order them); a line chart over a date or timestamp `x` uses a time axis, over a
+number a continuous axis, both ordered by `x`. Two rows for the same `x` (in one series) are a
+run-time error, as is a negative pie slice. Rows whose `x` or `series` is null, and pie or
+non-total waterfall rows whose `y` is null, are left out with warning M509; a null `y` in a bar
+or line chart is a missing bar or a gap in the line. A waterfall `total` row with a null `y`
+shows the running sum.
+
+Charts show no data labels, percentages or tooltips: the renderer keeps values as 32-bit floats,
+which cannot print ordinary six-figure amounts to the cent. The same program on the same inputs
+writes byte-identical SVG files.
+
 ## BI models (Power BI)
 
 ```magi

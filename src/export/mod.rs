@@ -2,6 +2,7 @@
 //! declared sort keys, then every column. Files are written to unique temporary names and moved
 //! into place together by [`commit`], so a failed run never changes or half-writes an output.
 
+pub mod chart;
 pub mod excel;
 pub mod tmdl;
 
@@ -221,13 +222,15 @@ pub fn commit(staged: Vec<Staged>) -> Result<(), (usize, String)> {
     Err((i, msg))
 }
 
-/// What [`write`] produced: the staged file, `(relation, rows)` per written part, and
+/// What [`write`] produced: the staged file, `(relation, rows)` per written part,
 /// `(sheet, column, count)` for XLSX numbers written as text because an Excel number (an IEEE
-/// double) cannot hold them exactly.
+/// double) cannot hold them exactly, and the chart rows left out.
 pub struct Written {
     pub staged: Staged,
     pub parts: Vec<(String, u64)>,
     pub as_text: Vec<(String, String, u64)>,
+    /// Chart rows not drawn because a needed value is null.
+    pub left_out: u64,
 }
 
 /// Write one export to a unique temp file next to its target. The target is replaced only by
@@ -244,6 +247,7 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
     let tmp = staged.tmp();
     let mut written = Vec::new();
     let mut as_text = Vec::new();
+    let mut left_out = 0u64;
     let result = (|| -> Result<(), String> {
         match export.format {
             ExportFormat::Csv | ExportFormat::Parquet | ExportFormat::Json => {
@@ -298,6 +302,12 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
                 }
                 excel::write_xlsx(tmp, &sheets)?;
             }
+            ExportFormat::Svg { chart } => {
+                let c = &hir.charts[chart];
+                let (rows, skipped) = chart::write_svg(conn, hir, c, tmp)?;
+                written.push((c.relation.clone(), rows));
+                left_out = skipped;
+            }
         }
         Ok(())
     })();
@@ -306,6 +316,7 @@ pub fn write(conn: &duckdb::Connection, hir: &Hir, export: &Export) -> Result<Wr
             staged,
             parts: written,
             as_text,
+            left_out,
         }),
         Err(e) => {
             staged.discard();

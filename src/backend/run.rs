@@ -1002,6 +1002,21 @@ impl Runner<'_> {
                         .help("Excel numbers hold 15 significant digits and times milliseconds; export to .csv, .parquet or .duckdb to keep the values as they are"),
                     );
                 }
+                let n = written.left_out;
+                if n > 0 {
+                    self.diags.push(
+                        Diagnostic::warning(
+                            "M509",
+                            format!(
+                                "chart `{}` left out {n} {} with a null value",
+                                e.parts[0].name,
+                                if n == 1 { "row" } else { "rows" }
+                            ),
+                        )
+                        .label(e.span, "this export")
+                        .help("null x, series, or pie/waterfall y values cannot be drawn; filter or coalesce them in the dataset"),
+                    );
+                }
                 Ok(())
             }
             Err(msg) => {

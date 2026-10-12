@@ -4,6 +4,7 @@
 //! Every problem found is reported (one `magi check` shows everything it can), and a relation
 //! that failed to resolve is "poisoned" so it does not cascade into follow-up errors.
 
+mod chart;
 mod expr;
 mod model;
 mod pipeline;
@@ -101,6 +102,8 @@ pub struct Analyzer<'a> {
     connections: HashMap<String, usize>,
     /// Datasets whose columns stay unknown even at run time (`native_sql` without `schema`).
     native_open: HashSet<String>,
+    /// Lower-case names of every `chart` declaration, resolved or not.
+    chart_decls: HashSet<String>,
     state: HashMap<String, State>,
     provider: &'a mut dyn SchemaProvider,
 }
@@ -128,6 +131,7 @@ pub fn analyze(
         natives_noted: HashSet::new(),
         connections: HashMap::new(),
         native_open: HashSet::new(),
+        chart_decls: HashSet::new(),
         state: HashMap::new(),
         provider,
     };
@@ -158,6 +162,12 @@ pub fn analyze(
         if let Statement::Validate(v) = s {
             // validations of relations that are never referenced still run
             a.ensure(&v.target.display(), Some(v.target.span));
+        }
+    }
+    // before exports: an .svg export looks its chart up
+    for s in loaded.statements() {
+        if let Statement::Chart(c) = s {
+            a.chart(c);
         }
     }
     for s in loaded.statements() {
@@ -297,6 +307,7 @@ impl<'a> Analyzer<'a> {
                 | Statement::Import(_)
                 | Statement::Export(_)
                 | Statement::Model(_)
+                | Statement::Chart(_)
                 | Statement::Test(_) => {}
             }
         }
@@ -1896,6 +1907,10 @@ impl<'a> Analyzer<'a> {
             .and_then(|x| x.to_str())
             .map(str::to_ascii_lowercase)
             .unwrap_or_default();
+        if ext == "svg" {
+            self.svg_export(e, path, raw);
+            return;
+        }
         let format = match ext.as_str() {
             "csv" => ExportFormat::Csv,
             "parquet" => ExportFormat::Parquet,
@@ -1906,7 +1921,7 @@ impl<'a> Analyzer<'a> {
                 self.err(
                     Diagnostic::error("M501", format!("cannot tell the output format of `{raw}`"))
                         .label(e.path.span, "unknown file extension")
-                        .help("use .csv, .parquet, .xlsx, .duckdb or .json"),
+                        .help("use .csv, .parquet, .xlsx, .duckdb, .json, or .svg for a chart"),
                 );
                 return;
             }
@@ -1930,6 +1945,9 @@ impl<'a> Analyzer<'a> {
         }
         match &e.target {
             ast::ExportTarget::Single(r) => {
+                if self.chart_export_elsewhere(&r.display(), e) {
+                    return;
+                }
                 let Some(i) = self.rel_ref(r) else {
                     return;
                 };
@@ -1985,6 +2003,9 @@ impl<'a> Analyzer<'a> {
                         );
                         continue;
                     }
+                    if self.chart_export_elsewhere(&p.rel.display(), e) {
+                        continue;
+                    }
                     if let Some(i) = self.rel_ref(&p.rel) {
                         parts.push(ExportPart {
                             name: p.name.value.clone(),
@@ -2015,8 +2036,24 @@ impl<'a> Analyzer<'a> {
                 }
             }
         }
+        if self.same_file_exported(&path, raw, e.path.span) {
+            return;
+        }
+        let idx = self.hir.exports.len();
+        self.hir.exports.push(Export {
+            path,
+            display_path: raw.clone(),
+            format,
+            parts,
+            span: e.path.span,
+        });
+        self.hir.order.push(Node::Export(idx));
+    }
+
+    /// `path` is already written by an earlier export: reports M504.
+    fn same_file_exported(&mut self, path: &std::path::Path, raw: &str, span: Span) -> bool {
         // `out/a.csv`, `./out/a.csv` and `out/../out/a.csv` are one file
-        let identity = crate::export::file_identity(&path);
+        let identity = crate::export::file_identity(path);
         if self
             .hir
             .exports
@@ -2028,16 +2065,88 @@ impl<'a> Analyzer<'a> {
                     "M504",
                     format!("`{raw}` is written by more than one export"),
                 )
-                .label(e.path.span, "same output file"),
+                .label(span, "same output file"),
             );
+            return true;
+        }
+        false
+    }
+
+    /// `name` is a chart exported to a file that is not .svg: reports M507.
+    fn chart_export_elsewhere(&mut self, name: &str, e: &ast::ExportDecl) -> bool {
+        if !self.chart_decls.contains(&name.to_ascii_lowercase()) {
+            return false;
+        }
+        self.err(
+            Diagnostic::error(
+                "M507",
+                format!("chart `{name}` can only be exported to a .svg file"),
+            )
+            .label(e.path.span, "not .svg"),
+        );
+        true
+    }
+
+    /// `export <chart> to "x.svg"`.
+    fn svg_export(&mut self, e: &'a ast::ExportDecl, path: PathBuf, raw: &str) {
+        for o in &e.options {
+            self.unknown_option(o, &[], "this export");
+        }
+        let r = match &e.target {
+            ast::ExportTarget::Single(r) => r,
+            ast::ExportTarget::Multi(_) => {
+                self.err(
+                    Diagnostic::error(
+                        "M502",
+                        "only .xlsx and .duckdb exports can hold several relations",
+                    )
+                    .label(e.path.span, "single-relation format")
+                    .help("write one `export <relation> to \"...\"` per file"),
+                );
+                return;
+            }
+        };
+        let n = r.display();
+        let Some(ci) = self.chart_named(&n) else {
+            if self.chart_decls.contains(&n.to_ascii_lowercase()) {
+                return; // the chart's own errors are reported
+            }
+            if self.hir.relation(&n).is_some() {
+                self.err(
+                    Diagnostic::error(
+                        "M507",
+                        format!("`{n}` is a relation; an .svg export writes a `chart`"),
+                    )
+                    .label(r.span, "not a chart")
+                    .help(format!(
+                        "declare `chart {0}_chart = {0} {{ kind: bar  x: ...  y: ... }}` and export it",
+                        n.replace('.', "_")
+                    )),
+                );
+            } else if !self.canon.contains_key(&n.to_ascii_lowercase()) {
+                let mut d = Diagnostic::error("M507", format!("no chart named `{n}`"))
+                    .label(r.span, "unknown chart");
+                if let Some(s) = did_you_mean(&n, self.hir.charts.iter().map(|c| c.name.as_str())) {
+                    d = d.help(format!("did you mean `{s}`?"));
+                }
+                self.err(d);
+            }
+            return;
+        };
+        if self.same_file_exported(&path, raw, e.path.span) {
             return;
         }
+        let chart = &self.hir.charts[ci];
+        let part = ExportPart {
+            name: chart.name.clone(),
+            relation: chart.relation.clone(),
+        };
         let idx = self.hir.exports.len();
         self.hir.exports.push(Export {
             path,
-            display_path: raw.clone(),
-            format,
-            parts,
+            display_path: raw.to_string(),
+            format: ExportFormat::Svg { chart: ci },
+            parts: vec![part],
             span: e.path.span,
         });
         self.hir.order.push(Node::Export(idx));

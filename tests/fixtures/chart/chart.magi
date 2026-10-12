@@ -1,0 +1,22 @@
+source lines = csv("lines.csv") {
+    schema {
+        day: date?
+        kind: string
+        n: int
+        amount: decimal(10, 2)?
+    }
+}
+
+dataset by_kind = lines
+    |> group by kind
+    |> aggregate { n = sum(n) }
+
+chart defects = lines { kind: bar  x: day  y: n  series: kind  title: "Defects by month" }
+chart trend = lines { kind: line  x: day  y: n  series: kind }
+chart share = by_kind { kind: pie  x: kind  y: n }
+chart movement = lines { kind: waterfall  x: kind  y: amount }
+
+export defects to "out/defects.svg"
+export trend to "out/trend.svg"
+export share to "out/share.svg"
+export movement to "out/movement.svg"

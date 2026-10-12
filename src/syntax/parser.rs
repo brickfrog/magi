@@ -86,6 +86,7 @@ pub const STATEMENT_KEYWORDS: &[&str] = &[
     "export",
     "runtime",
     "model",
+    "chart",
     "test",
 ];
 
@@ -97,6 +98,7 @@ const DECLARING_KEYWORDS: &[&str] = &[
     "dataset",
     "reconcile",
     "model",
+    "chart",
 ];
 
 type PResult<T> = Result<T, Diagnostic>;
@@ -332,6 +334,7 @@ impl Parser {
             "reconcile" => self.reconcile(start)?,
             "export" => self.export(start)?,
             "model" => self.model(start)?,
+            "chart" => self.chart(start)?,
             "test" => self.test(start)?,
             _ => {
                 let mut d = self.unexpected("a statement (`source`, `dataset`, `reconcile`, ...)");
@@ -1424,6 +1427,25 @@ impl Parser {
         }))
     }
 
+    // ---- chart --------------------------------------------------------------------------------
+
+    fn chart(&mut self, start: Span) -> PResult<Statement> {
+        self.bump();
+        let name = self.ident()?;
+        self.expect(&Tok::Assign)?;
+        let rel = self.rel_ref()?;
+        if !self.at(&Tok::LBrace) {
+            return Err(self.unexpected("`{` with the chart's `kind`, `x` and `y`"));
+        }
+        let options = self.option_block()?;
+        Ok(Statement::Chart(ChartDecl {
+            name,
+            rel,
+            options,
+            span: start.to(self.prev_span()),
+        }))
+    }
+
     // ---- expressions --------------------------------------------------------------------------
 
     fn expr_list(&mut self, close: &Tok) -> PResult<Vec<Expr>> {
@@ -1841,6 +1863,18 @@ export r.matches to "m.csv""#,
             p.diagnostics[0]
                 .message
                 .contains("`{` with the window's columns"),
+            "{}",
+            p.diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn chart_options_need_braces() {
+        let p = parse(0, "chart c = lines kind: bar");
+        assert_eq!(p.diagnostics.len(), 1, "{:?}", p.diagnostics);
+        assert_eq!(p.diagnostics[0].code, "M001");
+        assert!(
+            p.diagnostics[0].message.contains("`{` with the chart's"),
             "{}",
             p.diagnostics[0].message
         );

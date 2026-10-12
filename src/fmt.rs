@@ -772,6 +772,11 @@ impl Formatter<'_> {
                     false,
                 );
             }
+            Statement::Chart(d) => {
+                let header = format!("chart {} = {}", ident(&d.name), rel_ref(&d.rel));
+                let items: Vec<Item> = d.options.iter().map(Item::Opt).collect();
+                self.braced(header.into(), &items, span, limit, false, false);
+            }
             Statement::Test(d) => {
                 let items: Vec<Item> = d.items.iter().map(Item::Test).collect();
                 self.braced(
@@ -1622,6 +1627,13 @@ reconcile result = source_a as a with source_b as b {
 }
 
 reconcile bare = x with y {}
+
+chart defects = lines { kind: bar  x: day  y: n }
+chart movement = result.matches {
+    kind: waterfall
+    x: kind
+    y: amount
+}
 
 export result.matches to "matches.xlsx"
 export summary to "summary.parquet" { compression: "zstd" }

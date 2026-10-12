@@ -709,6 +709,49 @@ pub enum ExportFormat {
     Xlsx,
     DuckDb,
     Json,
+    /// A chart (index into [`Hir::charts`]) drawn as SVG.
+    Svg {
+        chart: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartKind {
+    Bar,
+    Line,
+    Pie,
+    Waterfall,
+}
+
+/// How a chart's x values are placed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartAxis {
+    /// Evenly spaced labels in first-appearance (export) order.
+    Category,
+    /// Line chart over a date/timestamp column: unix seconds on a time axis.
+    Time,
+    /// Line chart over a numeric column: values on a continuous axis.
+    Value,
+}
+
+/// `chart name = relation { kind: ...  x: ...  y: ... }`.
+#[derive(Debug, Clone)]
+pub struct Chart {
+    pub name: String,
+    /// Relation the chart draws (canonical name from `Relation::name`).
+    pub relation: String,
+    pub kind: ChartKind,
+    pub axis: ChartAxis,
+    /// Column names as declared on the relation (canonical spelling from `Relation::column`).
+    pub x: String,
+    pub x_ty: Type,
+    pub y: String,
+    pub series: Option<String>,
+    /// Waterfall only: bool column marking total bars.
+    pub total: Option<String>,
+    pub title: Option<String>,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -803,6 +846,8 @@ pub struct Hir {
     pub validations: Vec<Validation>,
     pub reconciles: Vec<crate::reconcile::model::Reconcile>,
     pub exports: Vec<Export>,
+    /// Charts (`chart` declarations), exported to .svg.
+    pub charts: Vec<Chart>,
     /// BI semantic models (`magi compile --target tmdl`).
     pub models: Vec<Model>,
     pub relations: Vec<Relation>,

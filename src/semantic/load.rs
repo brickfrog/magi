@@ -39,7 +39,10 @@ impl Loaded {
                     .statements
                     .iter()
                     .filter_map(|s| match s {
-                        Statement::Export(_) | Statement::Model(_) | Statement::Test(_) => None,
+                        Statement::Export(_)
+                        | Statement::Model(_)
+                        | Statement::Chart(_)
+                        | Statement::Test(_) => None,
                         Statement::Source(d) => Some(Statement::Source(source(d))),
                         s => Some(s.clone()),
                     })
